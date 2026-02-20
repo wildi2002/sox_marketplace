@@ -107,7 +107,9 @@ if [ -d "$HOME/.foundry/bin" ] && [[ ":$PATH:" != *":$HOME/.foundry/bin:"* ]]; t
 fi
 
 # Check if Alto is already built
-if [ -f "alto" ] || [ -f "src/esm/cli/alto.js" ]; then
+ARTIFACT="src/contracts/EntryPointFilterOpsOverride.sol/EntryPointFilterOpsOverride08.json"
+
+if [ -f "$ARTIFACT" ]; then
     echo "   ✅ Alto already built"
     echo "   ${YELLOW}   (Skipping build. Delete 'alto' or 'src/esm' to force rebuild)${NC}"
 else
