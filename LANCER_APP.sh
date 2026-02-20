@@ -31,6 +31,10 @@ if [ ! -f "src/app/lib/crypto_lib/crypto_lib_bg.wasm" ]; then
     fi
 fi
 
+cd src/app
+npm install
+cd ../..
+
 echo "🌐 Lancement du serveur Next.js..."
 echo ""
 echo "L'application sera disponible sur: http://localhost:3000"

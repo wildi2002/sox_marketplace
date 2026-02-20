@@ -20,7 +20,7 @@ cd src/hardhat && npx hardhat node
 ./run-alto.sh
 
 # 5. In Terminal 4: Start Next.js
-npm run dev
+./LANCER_APP.sh
 
 # 6. In Terminal 5 (Optional): Start Electron Desktop
 # ⚠️ IMPORTANT: Next.js must be running BEFORE Electron
