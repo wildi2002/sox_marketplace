@@ -118,6 +118,37 @@ else
     echo "   ✅ Build completed"
 fi
 
+# Replace scripts/config.local.json with the desired content
+CONFIG_PATH="scripts/config.local.json"
+rm $CONFIG_PATH
+cat > "$CONFIG_PATH" <<'EOF'
+{
+    "network-name": "local",
+    "rpc-url": "http://127.0.0.1:8545",
+    "min-entity-stake": 1,
+    "min-executor-balance": "1000000000000000000",
+    "min-entity-unstake-delay": 1,
+    "max-bundle-wait": 3,
+    "max-bundle-size": 3,
+    "port": 4337,
+    "executor-private-keys": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "utility-private-key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "entrypoints": "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108",
+    "pimlico-simulation-contract": "0x998abeb3E57409262aE5b751f60747921B33613E",
+    "deploy-simulations-contract": false,
+    "enable-debug-endpoints": true,
+    "enable-cors": true,
+    "expiration-check": false,
+    "safe-mode": false,
+    "api-version": "v1,v2",
+    "public-client-log-level": "info",
+    "entrypoint-simulation-contract-v8": "0x70e0bA845a1A0F2DA3359C97E0285013525FFC49"
+}
+EOF
+
+echo "✅ scripts/config.local.json replaced with local config"
+
+
 echo "✅ Installation completed!"
 echo ""
 echo "To launch Alto, use the run-alto.sh script"
