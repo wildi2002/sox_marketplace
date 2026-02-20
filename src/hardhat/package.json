@@ -1,0 +1,25 @@
+{
+  "name": "2_hardhat",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy:entrypoint": "hardhat run scripts/deployEntryPoint.ts --network localhost"
+  },
+  "devDependencies": {
+    "@account-abstraction/contracts": "^0.7.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "ethers": "^6.14.1",
+    "hardhat": "^2.24.0"
+  },
+  "dependencies": {
+    "@account-abstraction/sdk": "^0.6.0",
+    "@account-abstraction/utils": "^0.6.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.8"
+  }
+}

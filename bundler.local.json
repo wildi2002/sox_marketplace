@@ -1,0 +1,11 @@
+{
+  "version": "0.7",
+  "chainId": 31337,
+  "entryPoints": ["0x5FbDB2315678afecb367f032d93F642f64180aa3"],
+  "rpcUrl": "http://127.0.0.1:8545",
+  "port": 3000,
+  "unsafe": true,
+  "maxBundleGas": 8000000,
+  "minBalance": "0.01",
+  "beneficiary": "0x0000000000000000000000000000000000000000"
+}

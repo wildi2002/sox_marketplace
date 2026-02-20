@@ -1,0 +1,15 @@
+{
+  "name": "crypto-lib",
+  "type": "module",
+  "version": "0.0.1",
+  "files": [
+    "crypto_lib_bg.wasm",
+    "crypto_lib.js",
+    "crypto_lib.d.ts"
+  ],
+  "main": "crypto_lib.js",
+  "types": "crypto_lib.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

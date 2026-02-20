@@ -1,0 +1,3 @@
+[submodule "bundler-alto"]
+	path = bundler-alto
+	url = https://github.com/pimlicolabs/alto.git

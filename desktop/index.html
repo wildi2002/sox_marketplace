@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SOX Local Precompute</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #050816;
+        color: #e5e7eb;
+      }
+      h1 {
+        font-size: 20px;
+        margin-bottom: 16px;
+      }
+      button {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: none;
+        background: #22c55e;
+        color: #020617;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      pre {
+        background: #020617;
+        padding: 12px;
+        border-radius: 6px;
+        overflow: auto;
+        font-size: 12px;
+      }
+      .status {
+        margin-top: 12px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SOX - Local Precompute (Native Rust)</h1>
+    <p>
+      This application reads a file directly from disk, calls the Rust binary
+      <code>precontract-cli</code> and displays the pre-computation result.
+    </p>
+    <button id="btn-precompute">Select a file and run precompute</button>
+    <div class="status" id="status"></div>
+    <h2>Raw Result</h2>
+    <pre id="output">(no calculation started yet)</pre>
+
+    <script>
+      const btn = document.getElementById("btn-precompute");
+      const statusEl = document.getElementById("status");
+      const outputEl = document.getElementById("output");
+
+      btn.addEventListener("click", async () => {
+        if (!window.electronAPI || !window.electronAPI.precompute) {
+          alert("electronAPI.precompute is not available.");
+          return;
+        }
+
+        btn.disabled = true;
+        statusEl.textContent = "Precompute in progress...";
+        outputEl.textContent = "";
+
+        try {
+          const res = await window.electronAPI.precompute();
+
+          if (res.cancelled) {
+            statusEl.textContent = "Operation cancelled.";
+            outputEl.textContent = "(cancelled by user)";
+          } else if (res.error) {
+            statusEl.textContent = "Error during precompute.";
+            outputEl.textContent = res.error;
+          } else {
+            statusEl.textContent =
+              "Precompute completed. File: " + (res.inputPath || "(unknown)");
+            outputEl.textContent = JSON.stringify(res, null, 2);
+          }
+        } catch (e) {
+          statusEl.textContent = "Unexpected error.";
+          outputEl.textContent = e && e.stack ? e.stack : String(e);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

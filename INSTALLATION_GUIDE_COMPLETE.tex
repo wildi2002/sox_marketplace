@@ -1,0 +1,183 @@
+\section{Installation Guide}
+
+\subsection{Prerequisites}
+
+\begin{itemize}
+  \item \textbf{Node.js} $\geq$ 22.13.1
+  \item \textbf{npm} $\geq$ 11.3.0
+  \item \textbf{Rust} + \textbf{Cargo} (to compile \texttt{precontract\_cli})
+  \item \textbf{sqlite3} $\geq$ 3.37.2
+  \item \textbf{pnpm} (for the Alto bundler)
+  \item A local node (Hardhat or Anvil)
+\end{itemize}
+
+\subsection{Installation}
+
+\textbf{Step 1: Install dependencies}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>
+npm install
+
+# Install additional dependencies
+npm install tsx typescript
+
+cd desktop
+npm install
+
+cd ../bundler-alto
+pnpm install
+\end{verbatim}
+
+\textbf{Step 2: Compile Rust binary}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>/src/wasm
+cargo build --release --bin precontract_cli
+\end{verbatim}
+
+\textbf{Step 3: Initialize database}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>
+mkdir -p src/app/db
+touch src/app/db/sox.sqlite
+cat src/app/db/init.sql | sqlite3 src/app/db/sox.sqlite
+\end{verbatim}
+
+\textbf{Step 4: Build bundler (if not already built)}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>/bundler-alto
+pnpm run build:all
+\end{verbatim}
+
+\subsection{Run (separate terminals)}
+
+\textbf{Terminal 1: Local chain}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>/src/hardhat
+npx hardhat node
+\end{verbatim}
+
+Wait for the node to start. It should display "Started HTTP and WebSocket JSON-RPC server at http://127.0.0.1:8545/"
+
+\textbf{Terminal 2: Deploy contracts}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>
+./deploy-all.sh
+\end{verbatim}
+
+This script will:
+\begin{itemize}
+  \item Deploy all contracts and libraries
+  \item Deploy EntryPoint and simulation contracts
+  \item Configure the bundler automatically
+  \item Create/update \texttt{.env.local} with required environment variables
+\end{itemize}
+
+\textbf{Alternative: Manual deployment}
+
+If the script doesn't work, deploy manually:
+
+\begin{verbatim}
+cd <PROJECT_ROOT>/src/hardhat
+
+# Compile contracts
+npx hardhat compile
+
+# Deploy complete stack (includes EntryPoint and bundler configuration)
+npx tsx scripts/deployCompleteStack.ts --network localhost
+\end{verbatim}
+
+\textbf{Terminal 3: Alto bundler}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>/bundler-alto
+chmod +x run-local.sh
+./run-local.sh
+\end{verbatim}
+
+The bundler will be available at \texttt{http://localhost:3002/rpc} (or the port configured in \texttt{scripts/config.local.json}).
+
+\textbf{Terminal 4: Next.js frontend}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>
+npm run dev
+\end{verbatim}
+
+The frontend will be available at \texttt{http://localhost:3000}.
+
+\textbf{Terminal 5 (optional): Electron}
+
+\begin{verbatim}
+cd <PROJECT_ROOT>/desktop
+npm start
+\end{verbatim}
+
+\subsection{Configuration}
+
+\subsubsection{Environment Variables}
+
+After deployment, a \texttt{.env.local} file should be created automatically. If not, create it manually at the project root:
+
+\begin{verbatim}
+# EntryPoint address (from deployment output)
+NEXT_PUBLIC_ENTRY_POINT=0x...
+
+# Bundler URL (check port in bundler-alto/scripts/config.local.json)
+NEXT_PUBLIC_BUNDLER_URL=http://localhost:3002/rpc
+
+# RPC URL
+NEXT_PUBLIC_RPC_URL=http://localhost:8545
+
+# Chain ID (Hardhat local: 31337)
+NEXT_PUBLIC_CHAIN_ID=31337
+\end{verbatim}
+
+\subsubsection{Bundler Configuration}
+
+The bundler configuration is in \texttt{bundler-alto/scripts/config.local.json}. The \texttt{deploy-all.sh} script should configure it automatically. If not, ensure the \texttt{entrypoints} field contains the EntryPoint address from deployment.
+
+\subsection{Ports}
+
+\begin{itemize}
+  \item \textbf{8545}: Local RPC (Hardhat/Anvil)
+  \item \textbf{3002}: Alto bundler (default, check \texttt{config.local.json})
+  \item \textbf{3000}: Next.js frontend
+\end{itemize}
+
+\subsection{Verification}
+
+After starting all services, verify:
+
+\begin{enumerate}
+  \item \textbf{Hardhat node}: \texttt{curl http://localhost:8545}
+  \item \textbf{Bundler}: Check logs in Terminal 3 for "Server listening on port 3002"
+  \item \textbf{Frontend}: Open \texttt{http://localhost:3000} in browser
+\end{enumerate}
+
+\subsection{Troubleshooting}
+
+\begin{itemize}
+  \item \textbf{Database errors}: Reinitialize the database (Step 3)
+  \item \textbf{Bundler won't start}: Ensure Hardhat node is running and contracts are deployed
+  \item \textbf{Port conflicts}: Check which ports are in use and adjust configuration
+  \item \textbf{Contract deployment fails}: Ensure Hardhat node is running and has enough accounts with ETH
+  \item \textbf{Bundler build errors}: Run \texttt{pnpm run build:all} in \texttt{bundler-alto}
+\end{itemize}
+
+\subsection{Note}
+
+Replace \texttt{<PROJECT\_ROOT>} with the local path of the project on your machine.
+
+File paths depend on where each user installs the project, so they must be adjusted accordingly.
+
+
+
+
+
+
