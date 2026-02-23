@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
             opening_value,
             session_key_private,
             session_key_address,
+            file_name,
             num_blocks,
             num_gates,
             dispute_smart_contract,

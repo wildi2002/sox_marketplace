@@ -4,6 +4,9 @@ import Button from "../common/Button";
 import { useEffect, useRef, useState } from "react";
 import SponsorModal from "./SponsorModal";
 import { deployOptimisticContract } from "../../lib/blockchain/optimistic";
+import ChfNote from "../common/ChfNote";
+import { useUser } from "@/app/lib/UserContext";
+import { useToast } from "@/app/lib/ToastContext";
 
 type Contract = {
     id: number;
@@ -12,6 +15,8 @@ type Contract = {
 };
 
 export default function SponsorContractsListView() {
+    const { user } = useUser();
+    const { showToast } = useToast();
     const [modalShown, showModal] = useState(false);
     const [contracts, setContracts] = useState<Contract[]>([]);
     const [selectedContract, setSelectedContract] = useState(-1);
@@ -89,13 +94,10 @@ export default function SponsorContractsListView() {
 
             if (deployCancelledRef.current) return;
 
-            alert(
-                `✅ Contrat sponsorisé ${selectedContract}!\n\n` +
-                `📍 Contrat déployé à: ${contractAddress}`
-            );
+            showToast(`Vertrag ${selectedContract} gesponsert!\nDeployed: ${contractAddress}`, "success", 7000);
         } catch (e: any) {
             console.error("Erreur de déploiement:", e);
-            alert(`Erreur: ${e?.message || e?.toString()}`);
+            showToast(`Fehler: ${e?.message || e?.toString()}`, "error");
         } finally {
             setIsDeploying(false);
         }
@@ -124,7 +126,7 @@ export default function SponsorContractsListView() {
                             className="even:bg-gray-200 border-b border-black h-15"
                         >
                             <td className="p-2 w-1/5">{c.id}</td>
-                            <td className="p-2 w-1/5">{c.tip_completion}</td>
+                            <td className="p-2 w-1/5">{c.tip_completion} ETH<ChfNote value={c.tip_completion} /></td>
                             <td className="p-2 w-1/5">{c.timeout_delay}</td>
                             <td className="p-2 w-1/5 text-center">
                                 <Button
@@ -147,6 +149,7 @@ export default function SponsorContractsListView() {
                     onClose={() => showModal(false)}
                     onConfirm={handleSponsorConfirmation}
                     id_prefix="contract"
+                    defaultPk={user?.publicKey}
                 />
             )}
 
@@ -154,7 +157,7 @@ export default function SponsorContractsListView() {
                 <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
                     <div className="flex flex-col items-center gap-4">
                         <div className="text-white text-lg">
-                            Deploying contract...
+                            Deploying contract… please wait
                         </div>
 
                         <div role="status">
@@ -177,7 +180,7 @@ export default function SponsorContractsListView() {
                         </div>
 
                         <Button
-                            label="← Retour / Annuler"
+                            label="← Cancel"
                             onClick={handleCancelDeploy}
                             width="auto"
                         />

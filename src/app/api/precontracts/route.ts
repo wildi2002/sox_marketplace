@@ -254,7 +254,8 @@ export async function PUT(req: Request) {
                 timeout_delay: data.timeout_delay || 3600,
                 algorithm_suite: data.algorithm_suite || "AES-128-CTR",
                 file: preOut.file || preOut.ciphertext || "",
-                file_path: filePath || ""
+                file_path: filePath || "",
+                file_name: preOut.file_name || ""
             };
         } else {
             // Standard format (should no longer be used)
@@ -268,16 +269,16 @@ export async function PUT(req: Request) {
         try {
             stmt = db.prepare(`INSERT INTO contracts (
                 item_description, opening_value,
-                pk_buyer, pk_vendor, price, num_blocks, 
+                pk_buyer, pk_vendor, price, num_blocks,
                 num_gates, commitment, tip_completion, tip_dispute,
                 protocol_version, timeout_delay, algorithm_suite,
-                accepted
+                accepted, file_name
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?,
-                0
+                0, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -292,7 +293,8 @@ export async function PUT(req: Request) {
                 contractData.tip_dispute,
                 contractData.protocol_version,
                 contractData.timeout_delay,
-                contractData.algorithm_suite
+                contractData.algorithm_suite,
+                contractData.file_name
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);
@@ -331,6 +333,7 @@ export async function PUT(req: Request) {
                 const module = readFileSync(`${WASM_PATH}crypto_lib_bg.wasm`);
                 initSync({ module: module });
 
+                fs.mkdirSync(UPLOADS_PATH, { recursive: true });
                 const fileName = `file_${id}.enc`;
                 fs.writeFileSync(path.join(UPLOADS_PATH, fileName), hex_to_bytes(contractData.file));
             } catch (wasmError: any) {

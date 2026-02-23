@@ -1,23 +1,31 @@
 "use client";
 
+import { useState } from "react";
 import Modal from "../common/Modal";
 import Button from "../common/Button";
 import { Contract } from "./NonAcceptedPrecontractsListView";
-import init from "@/app/lib/crypto_lib";
-import { downloadFile, hexToBytes } from "@/app/lib/helpers";
-
-const BLOCK_SIZE = 64;
+import initWasm, { check_precontract, bytes_to_hex } from "@/app/lib/crypto_lib";
+import { hexToBytes, downloadFile } from "@/app/lib/helpers";
+import ChfNote from "../common/ChfNote";
+import { useToast } from "@/app/lib/ToastContext";
 
 interface NonAcceptedPrecontractModalProps {
     onClose: () => void;
     contract?: Contract;
 }
 
+type VerifyResult = { success: true; h_circuit: string; h_ct: string } | { success: false; error: string };
+
 export default function NonAcceptedPrecontractModal({
     onClose,
     contract,
 }: NonAcceptedPrecontractModalProps) {
-    if (!contract) return;
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+    const { showToast } = useToast();
+
+    if (!contract) return null;
+
     const {
         id,
         pk_buyer,
@@ -29,199 +37,165 @@ export default function NonAcceptedPrecontractModal({
         protocol_version,
         timeout_delay,
         algorithm_suite,
-        accepted,
-        sponsor,
         commitment,
         opening_value,
-        optimistic_smart_contract,
     } = contract;
 
     const handleVerifyCommitment = async () => {
+        setIsVerifying(true);
+        setVerifyResult(null);
         try {
-        await init();
+            // 1. Load WASM
+            await initWasm();
 
-            const response = await fetch("/api/precontracts/verify", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ id }),
-            });
-
-            // Vérifier le Content-Type pour s'assurer que c'est du JSON
-            const contentType = response.headers.get("content-type") || "";
-            const text = await response.text();
-
-            if (!response.ok) {
-                // Si ce n'est pas OK, essayer de parser le JSON pour obtenir le message d'erreur
-                let errorMsg = `Erreur HTTP ${response.status}`;
-                if (contentType.includes("application/json")) {
-                    try {
-                        const errorJson = JSON.parse(text);
-                        errorMsg = errorJson.error || errorMsg;
-                    } catch (e) {
-                        // Si on ne peut pas parser, utiliser le texte brut
-                        errorMsg = text ? text.slice(0, 200) : errorMsg;
-                    }
-                } else {
-                    // Si ce n'est pas du JSON, utiliser le texte brut (truncated)
-                    errorMsg = text ? text.slice(0, 200) : errorMsg;
-                }
-                console.error("Erreur /api/precontracts/verify:", text);
-                throw new Error(errorMsg);
+            // 2. Fetch ciphertext from server (only the encrypted bytes, never plaintext)
+            const fileRes = await fetch(`/api/files/${id}`);
+            if (!fileRes.ok) {
+                const err = await fileRes.json().catch(() => ({}));
+                throw new Error(err.error || `Could not fetch ciphertext (HTTP ${fileRes.status})`);
             }
+            const { file: ctHex } = await fileRes.json();
+            const ctBytes = hexToBytes(ctHex);
 
-            if (!text) {
-                throw new Error("Réponse vide de /api/precontracts/verify");
-            }
+            // 3. Verify commitment entirely in the browser — no server involvement
+            const result = check_precontract(item_description, commitment, opening_value, ctBytes);
 
-            // Maintenant parser le JSON seulement si la réponse est OK
-            let parsed: any;
-            try {
-                parsed = JSON.parse(text);
-            } catch (e) {
-                console.error(
-                    "Réponse non JSON de /api/precontracts/verify:",
-                    text
-                );
-                throw new Error(
-                    `Réponse invalide de /api/precontracts/verify (attendu JSON): ${text.slice(
-                        0,
-                        200
-                    )}`
-                );
-            }
+            if (result.success) {
+                const h_circuit_hex = bytes_to_hex(result.h_circuit);
+                const h_ct_hex = bytes_to_hex(result.h_ct);
 
-            const { success, h_circuit_hex, h_ct_hex } = parsed;
-
-        if (success) {
-            if (
-                confirm(
-                    "Commitment is correct! Do you want to save the encrypted file ?"
-                )
-            ) {
-                    // On peut plus tard renvoyer ct ou un lien vers ct depuis le backend
-                    alert(
-                        "Commitment correct. Récupération du fichier chiffré à implémenter."
-                    );
-            }
-
-                localStorage.setItem(
-                    `h_circuit_${id}`,
-                    h_circuit_hex
-                );
+                // Save circuit/ciphertext accumulators for later protocol steps
+                localStorage.setItem(`h_circuit_${id}`, h_circuit_hex);
                 localStorage.setItem(`h_ct_${id}`, h_ct_hex);
-        } else {
-            alert("!!! Commitment doesn't match the received file !!!");
+
+                setVerifyResult({ success: true, h_circuit: h_circuit_hex, h_ct: h_ct_hex });
+            } else {
+                setVerifyResult({ success: false, error: "Commitment does not match the received ciphertext." });
             }
         } catch (e: any) {
-            console.error("Erreur lors de la vérification du commitment:", e);
-            alert(`Erreur vérification commitment: ${e.message || e}`);
+            setVerifyResult({ success: false, error: e.message || String(e) });
+        } finally {
+            setIsVerifying(false);
         }
     };
 
     const handleAccept = async () => {
         try {
-            // Accepter le contrat
             const acceptResponse = await fetch("/api/precontracts/accept", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id }),
             });
 
             if (!acceptResponse.ok) {
-                throw new Error(`Erreur lors de l'acceptation du contrat: ${acceptResponse.status}`);
+                throw new Error(`Error accepting contract: ${acceptResponse.status}`);
             }
 
-            // Télécharger automatiquement le ciphertext
+            // Download ciphertext locally for the buyer's records
             try {
-                const fileResponse = await fetch(`/api/files/${id}`, {
-                    method: "GET",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                });
-
+                const fileResponse = await fetch(`/api/files/${id}`);
                 if (fileResponse.ok) {
-                    const fileData = await fileResponse.json();
-                    if (fileData.file) {
-                        const ctBytes = hexToBytes(fileData.file);
-                        downloadFile(ctBytes, `contract_${id}_ciphertext.enc`);
-                        console.log(`✅ Ciphertext téléchargé pour le contrat ${id}`);
+                    const { file: ctHex } = await fileResponse.json();
+                    if (ctHex) {
+                        downloadFile(hexToBytes(ctHex), `contract_${id}_ciphertext.enc`);
                     }
-                } else {
-                    console.warn(`⚠️ Impossible de télécharger le ciphertext pour le contrat ${id}`);
                 }
-            } catch (downloadError: any) {
-                console.warn("⚠️ Erreur lors du téléchargement du ciphertext:", downloadError);
-                // Ne pas bloquer l'acceptation si le téléchargement échoue
+            } catch (downloadError) {
+                console.warn("Could not download ciphertext:", downloadError);
             }
 
             window.dispatchEvent(new Event("reloadData"));
-            alert(`Accepted contract ${id}. Ciphertext downloaded.`);
+            showToast(`Vertrag ${id} akzeptiert. Ciphertext heruntergeladen.`, "success");
             onClose();
         } catch (error: any) {
-            console.error("❌ Erreur lors de l'acceptation:", error);
-            alert(`Erreur lors de l'acceptation: ${error.message || error}`);
+            showToast(`Fehler beim Akzeptieren: ${error.message || error}`, "error");
         }
     };
 
     const handleReject = async () => {
         await fetch("/api/precontracts/reject", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id }),
         });
         window.dispatchEvent(new Event("reloadData"));
-        alert(`Rejected contract ${id}`);
+        showToast(`Vertrag ${id} abgelehnt`, "info");
         onClose();
     };
 
     return (
-        <Modal title="Non accepted precontract details" onClose={onClose}>
-            <div className="space-y-4 grid grid-cols-2 gap-4">
+        <Modal title="Precontract Details" onClose={onClose}>
+            <div className="grid grid-cols-2 gap-4">
+                <div><strong>Contract ID:</strong> {id}</div>
                 <div>
-                    <strong>Contract ID:</strong> {id}
+                    <strong>Price:</strong> {price} ETH
+                    <ChfNote value={price} display="block" />
                 </div>
-                <div>
+                <div className="col-span-2 font-mono text-sm">
+                    <strong>Vendor:</strong> {pk_vendor}
+                </div>
+                <div className="col-span-2 font-mono text-sm">
                     <strong>Buyer:</strong> {pk_buyer}
                 </div>
                 <div>
-                    <strong>Vendor:</strong> {pk_vendor}
+                    <strong>Tip Completion:</strong> {tip_completion} ETH
+                    <ChfNote value={tip_completion} display="block" />
                 </div>
                 <div>
-                    <strong>Item Description:</strong> {item_description}
+                    <strong>Tip Dispute:</strong> {tip_dispute} ETH
+                    <ChfNote value={tip_dispute} display="block" />
                 </div>
-                <div>
-                    <strong>Price:</strong> {price}
-                </div>
-                <div>
-                    <strong>Tip Completion:</strong> {tip_completion}
-                </div>
-                <div>
-                    <strong>Tip Dispute:</strong> {tip_dispute}
-                </div>
-                <div>
-                    <strong>Protocol Version:</strong> {protocol_version}
-                </div>
-                <div>
-                    <strong>Timeout Delay:</strong> {timeout_delay}
-                </div>
-                <div>
-                    <strong>Algorithm Suite:</strong> {algorithm_suite}
-                </div>
-                <div className="col-span-2">
+                <div><strong>Timeout:</strong> {timeout_delay} s</div>
+                <div><strong>Protocol Version:</strong> {protocol_version}</div>
+                <div><strong>Algorithm:</strong> {algorithm_suite}</div>
+
+                {/* Commitment verification section */}
+                <div className="col-span-2 border-t border-gray-300 pt-4">
+                    <p className="text-sm text-gray-600 mb-3">
+                        Verify that the vendor's commitment matches the encrypted file.
+                        This runs entirely in your browser — no data leaves your machine unencrypted.
+                    </p>
+
                     <Button
-                        label="Verify commitment"
+                        label={isVerifying ? "Verifying…" : "Verify Commitment (Browser)"}
                         onClick={handleVerifyCommitment}
+                        isDisabled={isVerifying}
                     />
+
+                    {verifyResult && (
+                        <div
+                            className={`mt-3 p-3 rounded text-sm ${
+                                verifyResult.success
+                                    ? "bg-green-100 border border-green-400 text-green-800"
+                                    : "bg-red-100 border border-red-400 text-red-800"
+                            }`}
+                        >
+                            {verifyResult.success ? (
+                                <>
+                                    <p className="font-semibold mb-1">✓ Commitment valid</p>
+                                    <p className="text-xs font-mono break-all">
+                                        h_circuit: {verifyResult.h_circuit.slice(0, 20)}…
+                                    </p>
+                                    <p className="text-xs font-mono break-all">
+                                        h_ct: {verifyResult.h_ct.slice(0, 20)}…
+                                    </p>
+                                    <p className="text-xs mt-1 text-green-700">
+                                        Accumulators saved to localStorage.
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="font-semibold mb-1">✗ Commitment INVALID</p>
+                                    <p>{verifyResult.error}</p>
+                                    <p className="text-xs mt-1">Do not accept this contract.</p>
+                                </>
+                            )}
+                        </div>
+                    )}
                 </div>
 
-                <div className="col-span-2 flex gap-8">
+                {/* Action buttons */}
+                <div className="col-span-2 flex gap-4 pt-2">
                     <Button label="Accept" onClick={handleAccept} width="1/2" />
                     <Button label="Reject" onClick={handleReject} width="1/2" />
                 </div>

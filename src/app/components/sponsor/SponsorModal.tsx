@@ -9,6 +9,7 @@ interface SponsorModalProps {
     onClose: () => void;
     onConfirm: (pk: string) => void;
     id_prefix: string;
+    defaultPk?: string;
 }
 
 export default function SponsorModal({
@@ -16,8 +17,9 @@ export default function SponsorModal({
     onClose,
     onConfirm,
     id_prefix,
+    defaultPk,
 }: SponsorModalProps) {
-    const [pkSponsor, setPkSponsor] = useState(ALL_PUBLIC_KEYS[0]);
+    const [pkSponsor, setPkSponsor] = useState(defaultPk ?? ALL_PUBLIC_KEYS[0]);
 
     const onClick = () => {
         onConfirm(pkSponsor);

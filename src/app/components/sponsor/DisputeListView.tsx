@@ -8,6 +8,8 @@ import DisputeSimulationModal from "./DisputeSimulationModal";
 import FormSelect from "../common/FormSelect";
 import { ALL_PUBLIC_KEYS } from "@/app/lib/blockchain/config";
 import init, { check_argument, hex_to_bytes } from "@/app/lib/crypto_lib";
+import ChfNote from "../common/ChfNote";
+import { useToast } from "@/app/lib/ToastContext";
 import {
     getBasicInfo,
     sendSbFee,
@@ -36,6 +38,7 @@ export default function DisputeListView() {
     const [disputes, setDisputes] = useState<Dispute[]>([]);
     const [selectedDispute, setSelectedDispute] = useState<Dispute>();
     const [publicKey, setPublicKey] = useState<string>(ALL_PUBLIC_KEYS[0]);
+    const { showToast } = useToast();
 
     const fetchDisputes = () => {
         fetch("/api/disputes")
@@ -49,7 +52,7 @@ export default function DisputeListView() {
                 }
                 return res.text().then((text) => {
                     if (!text || text.trim() === "") {
-                        return []; // Retourner un tableau vide si la réponse est vide
+                        return [];
                     }
                     try {
                         return JSON.parse(text);
@@ -69,7 +72,7 @@ export default function DisputeListView() {
             })
             .catch((error) => {
                 console.error("Error fetching disputes:", error);
-                setDisputes([]); // Définir un tableau vide en cas d'erreur
+                setDisputes([]);
             });
     };
 
@@ -96,12 +99,12 @@ export default function DisputeListView() {
         }
 
         // Vérifier si le sponsor est déjà enregistré
-        const alreadyRegistered = sponsorType === "buyer" 
-            ? !!selectedDispute.pk_buyer_sponsor 
+        const alreadyRegistered = sponsorType === "buyer"
+            ? !!selectedDispute.pk_buyer_sponsor
             : !!selectedDispute.pk_vendor_sponsor;
 
         if (alreadyRegistered) {
-            alert(`Le sponsor ${sponsorType === "buyer" ? "du buyer" : "du vendor"} est déjà enregistré pour ce contrat.`);
+            showToast(`Der ${sponsorType === "buyer" ? "Käufer" : "Verkäufer"}-Sponsor ist für diesen Vertrag bereits registriert.`, "warning");
             return;
         }
 
@@ -117,15 +120,14 @@ export default function DisputeListView() {
             await sendSbFee(pk, selectedDispute.optimistic_smart_contract);
         }
 
-        alert(
-            `✅ Sponsor ${sponsorType === "buyer" ? "du buyer" : "du vendor"} enregistré pour le contrat ${selectedDispute.contract_id}!${
+        showToast(
+            `${sponsorType === "buyer" ? "Käufer" : "Verkäufer"}-Sponsor für Vertrag ${selectedDispute.contract_id} registriert!${
                 isVendor && disputeContractAddress
-                    ? `\n📍 Contrat de dispute déployé à: ${disputeContractAddress}`
+                    ? `\nDisput-Vertrag deployed: ${disputeContractAddress}`
                     : ""
-            }`
+            }`, "success"
         );
 
-        // Recharger les données
         fetchDisputes();
     };
 
@@ -133,7 +135,7 @@ export default function DisputeListView() {
         await init();
 
         if (!selectedDispute) {
-            alert("something wrong happened!");
+            showToast("Ein unerwarteter Fehler ist aufgetreten.", "error");
             showModalProof(false);
             return;
         }
@@ -171,29 +173,30 @@ export default function DisputeListView() {
 
             // yandere dev core
             if (result.error) {
-                alert(`An error occurred: ${result.error}`);
+                showToast(`Fehler: ${result.error}`, "error");
             } else if (!result.is_valid) {
-                alert(
-                    `!!! Argument in NOT valid !!!\nThe ${
-                        isVendor ? "vendor" : "buyer"
-                    } may have lied`
+                showToast(
+                    `Argument ist UNGÜLTIG!\nDer ${isVendor ? "Verkäufer" : "Käufer"} könnte gelogen haben.`,
+                    "error"
                 );
             } else if (result.supports_buyer) {
-                alert(
+                showToast(
                     isVendor
-                        ? "!!!Vendor posted an argument that DOES NOT SUPPORT them!!!"
-                        : "Buyer posted an argument that supports them"
+                        ? "Verkäufer hat ein Argument eingereicht, das ihn NICHT unterstützt!"
+                        : "Käufer hat ein Argument eingereicht, das ihn unterstützt.",
+                    isVendor ? "error" : "success"
                 );
             } else {
-                alert(
+                showToast(
                     isVendor
-                        ? "Vendor posted an argument that supports them"
-                        : "!!!Buyer posted an argument that DOES NOT SUPPORT them!!!"
+                        ? "Verkäufer hat ein Argument eingereicht, das ihn unterstützt."
+                        : "Käufer hat ein Argument eingereicht, das ihn NICHT unterstützt!",
+                    isVendor ? "success" : "error"
                 );
             }
         } catch (error: any) {
             console.error("Error checking argument:", error);
-            alert(`Erreur lors de la vérification de l'argument: ${error?.message || "Unknown error"}`);
+            showToast(`Fehler bei der Argumentprüfung: ${error?.message || "Unbekannter Fehler"}`, "error");
         } finally {
             showModalProof(false);
         }
@@ -232,22 +235,26 @@ export default function DisputeListView() {
             );
         } catch (error: any) {
             console.error("Error downloading argument:", error);
-            alert(`Erreur lors du téléchargement de l'argument: ${error?.message || "Unknown error"}`);
+            showToast(`Fehler beim Herunterladen des Arguments: ${error?.message || "Unbekannter Fehler"}`, "error");
         }
     };
 
     return (
         <div className="bg-gray-300 p-4 rounded w-1/2 overflow-auto">
             <h2 className="text-lg font-semibold mb-4">Disputes</h2>
+            {disputes.length === 0 ? (
+                <p className="text-gray-600 text-center py-4">No disputes yet.</p>
+            ) : (
             <table className="w-full table-fixed border-collapse">
                 <thead>
                     <tr className="border-b border-black text-left font-medium">
-                        <th className="p-2 w-1/6">Contract ID</th>
-                        <th className="p-2 w-1/6">Tip</th>
-                        <th className="p-2 w-1/6">Buyer Sponsor</th>
-                        <th className="p-2 w-1/6">Vendor Sponsor</th>
-                        <th className="p-2 w-1/6"></th>
-                        <th className="p-2 w-1/6"></th>
+                        <th className="p-2 w-12">ID</th>
+                        <th className="p-2 w-28">Tip</th>
+                        <th className="p-2">Buyer Sponsor</th>
+                        <th className="p-2">Vendor Sponsor</th>
+                        <th className="p-2 w-32">Check</th>
+                        <th className="p-2 w-24">Download</th>
+                        <th className="p-2 w-24">Simulate</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -256,14 +263,14 @@ export default function DisputeListView() {
                             key={d.contract_id}
                             className="even:bg-gray-200 border-b border-black h-15"
                         >
-                            <td className="p-2 w-1/6">{d.contract_id}</td>
-                            <td className="p-2 w-1/6">{d.tip_dispute}</td>
-                            <td className="p-2 w-1/6">
+                            <td className="p-2">{d.contract_id}</td>
+                            <td className="p-2">{d.tip_dispute} ETH<ChfNote value={d.tip_dispute} /></td>
+                            <td className="p-2">
                                 {d.pk_buyer_sponsor ? (
                                     <span className="text-green-600 text-sm">✓ {d.pk_buyer_sponsor.slice(0, 10)}...</span>
                                 ) : (
                                     <Button
-                                        label="Sélectionner"
+                                        label="Select"
                                         onClick={() => {
                                             setSelectedDispute(d);
                                             setSponsorType("buyer");
@@ -273,12 +280,12 @@ export default function DisputeListView() {
                                     />
                                 )}
                             </td>
-                            <td className="p-2 w-1/6">
+                            <td className="p-2">
                                 {d.pk_vendor_sponsor ? (
                                     <span className="text-green-600 text-sm">✓ {d.pk_vendor_sponsor.slice(0, 10)}...</span>
                                 ) : (
                                     <Button
-                                        label="Sélectionner"
+                                        label="Select"
                                         onClick={() => {
                                             setSelectedDispute(d);
                                             setSponsorType("vendor");
@@ -288,7 +295,7 @@ export default function DisputeListView() {
                                     />
                                 )}
                             </td>
-                            <td className="p-2 text-center w-1/6">
+                            <td className="p-2 text-center">
                                 <Button
                                     label="Check argument"
                                     onClick={() => {
@@ -298,31 +305,30 @@ export default function DisputeListView() {
                                     width="full"
                                 />
                             </td>
-                            <td className="p-2 text-center w-1/12">
+                            <td className="p-2 text-center">
                                 <Button
                                     label="Download"
                                     onClick={() => handleClickDownloadArgument(d)}
                                     width="full"
                                 />
                             </td>
-                            <td className="p-2 text-center w-1/12">
-                                {d.dispute_smart_contract && d.optimistic_smart_contract && d.pk_buyer && d.pk_vendor && d.num_blocks && d.num_gates ? (
+                            <td className="p-2 text-center">
+                                {d.dispute_smart_contract && d.optimistic_smart_contract && d.pk_buyer && d.pk_vendor && d.num_blocks && d.num_gates && (
                                     <Button
-                                        label="Simuler"
+                                        label="Simulate"
                                         onClick={() => {
                                             setSelectedDispute(d);
                                             showModalSimulation(true);
                                         }}
                                         width="full"
                                     />
-                                ) : (
-                                    <span className="text-xs text-gray-500">N/A</span>
                                 )}
                             </td>
                         </tr>
                     ))}
                 </tbody>
             </table>
+            )}
 
             {modalProofShown && (
                 <Modal
@@ -348,7 +354,7 @@ export default function DisputeListView() {
 
             {modalSponsorShown && sponsorType && (
                 <SponsorModal
-                    title={`Sponsor ${sponsorType === "buyer" ? "du Buyer" : "du Vendor"}`}
+                    title={`Sponsor for ${sponsorType === "buyer" ? "Buyer" : "Vendor"}`}
                     onClose={() => {
                         showModalSponsor(false);
                         setSponsorType(null);

@@ -26,6 +26,7 @@ export type Contract = {
     opening_value: string;
     session_key_private?: string;
     session_key_address?: string;
+    file_name?: string;
     state?: bigint;
     dispute_smart_contract?: string;
     pk_sb?: string;

@@ -7,26 +7,42 @@ import FormTextField from "../common/FormTextField";
 import FormSelect from "../common/FormSelect";
 import FormFileInput from "../common/FormFileInput";
 import { isAddress } from "ethers";
+import initWasm, { compute_precontract_values, bytes_to_hex } from "@/app/lib/crypto_lib";
+import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
 
 interface NewContractModalProps {
     onClose: () => void;
     vendorPk: string;
     title: string;
+    prefillBuyerPk?: string;
+    requestId?: number;
+    prefillPrice?: string;
+    prefillTipCompletion?: string;
+    prefillTipDispute?: string;
+    prefillTimeoutDelay?: string;
 }
 
 export default function NewContractModal({
     onClose,
     vendorPk,
     title,
+    prefillBuyerPk,
+    requestId,
+    prefillPrice,
+    prefillTipCompletion,
+    prefillTipDispute,
+    prefillTimeoutDelay,
 }: NewContractModalProps) {
-    const [buyerPk, setBuyerPk] = useState("");
-    const [price, setPrice] = useState("");
-    const [tipCompletion, setTipCompletion] = useState("");
-    const [tipDispute, setTipDispute] = useState("");
+    const [buyerPk, setBuyerPk] = useState(prefillBuyerPk ?? "");
+    const [price, setPrice] = useState(prefillPrice ?? "");
+    const [tipCompletion, setTipCompletion] = useState(prefillTipCompletion ?? "");
+    const [tipDispute, setTipDispute] = useState(prefillTipDispute ?? "");
     const [version, setVersion] = useState("0");
-    const [timeoutDelay, setTimeoutDelay] = useState("");
+    const [timeoutDelay, setTimeoutDelay] = useState(prefillTimeoutDelay ?? "");
     const [algorithms, setAlgorithms] = useState("default");
     const [file, setFile] = useState<FileList | null>();
+    const [isComputing, setIsComputing] = useState(false);
+    const ethChfRate = useEthChfRate();
 
     // Spécifique mode Electron : on veut une seule fenêtre de sélection
     const [isElectron, setIsElectron] = useState(false);
@@ -199,92 +215,110 @@ export default function NewContractModal({
                 return;
             }
 
-            // Fallback: mode web pur, on envoie le fichier à l'API qui appellera le binaire natif côté serveur
+            // Web mode: encrypt in the browser using WASM, send only ciphertext to server
             if (!file || file.length === 0) {
                 alert("Veuillez sélectionner un fichier");
                 return;
             }
 
-            const formData = new FormData();
-            formData.append("pk_buyer", buyerPk);
-            formData.append("pk_vendor", vendorPk);
-            formData.append("price", price);
-            formData.append("tip_completion", tipCompletion);
-            formData.append("tip_dispute", tipDispute);
-            formData.append("protocol_version", version);
-            formData.append("timeout_delay", timeoutDelay);
-            formData.append("algorithm_suite", algorithms);
-            formData.append("file", file[0]);
+            setIsComputing(true);
+            await initWasm();
+
+            const fileBytes = new Uint8Array(await file[0].arrayBuffer());
+            const key = crypto.getRandomValues(new Uint8Array(16));
+            const precontract = compute_precontract_values(fileBytes, key);
+
+            const preOut = {
+                commitment_c_hex: bytes_to_hex(precontract.commitment.c),
+                commitment_o_hex: bytes_to_hex(precontract.commitment.o),
+                description_hex: bytes_to_hex(precontract.description),
+                num_blocks: precontract.num_blocks,
+                num_gates: precontract.num_gates,
+                h_circuit_hex: bytes_to_hex(precontract.h_circuit),
+                h_ct_hex: bytes_to_hex(precontract.h_ct),
+                file: bytes_to_hex(precontract.ct),
+                file_name: file[0].name,
+            };
 
             const response_raw = await fetch("/api/precontracts", {
                 method: "PUT",
-                body: formData,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    preOut,
+                    pk_buyer: buyerPk,
+                    pk_vendor: vendorPk,
+                    price,
+                    tip_completion: tipCompletion,
+                    tip_dispute: tipDispute,
+                    protocol_version: version,
+                    timeout_delay: timeoutDelay,
+                    algorithm_suite: algorithms,
+                }),
             });
+
+            setIsComputing(false);
 
             // Vérifier le Content-Type pour s'assurer que c'est du JSON
             const contentType = response_raw.headers.get("content-type") || "";
             const text = await response_raw.text();
-            
+
             if (!response_raw.ok) {
-                // Si ce n'est pas OK, essayer de parser le JSON pour obtenir le message d'erreur
                 let errorMsg = `Erreur HTTP ${response_raw.status}`;
                 let errorDetails: any = null;
-                
+
                 if (contentType.includes("application/json")) {
                     try {
                         const errorJson = JSON.parse(text);
                         errorMsg = errorJson.error || errorMsg;
                         errorDetails = errorJson.details;
-                        
-                        // Afficher les détails dans la console pour le débogage
                         if (errorDetails) {
                             console.error("Détails de l'erreur serveur:", errorDetails);
                         }
                     } catch (e) {
-                        // Si on ne peut pas parser, utiliser le texte brut
                         errorMsg = text ? text.slice(0, 200) : errorMsg;
                         console.error("Impossible de parser la réponse d'erreur comme JSON:", text);
                     }
                 } else {
-                    // Si ce n'est pas du JSON, utiliser le texte brut (truncated)
                     errorMsg = text ? text.slice(0, 200) : errorMsg;
                     console.error("Réponse d'erreur n'est pas du JSON. Type:", contentType, "Texte:", text);
                 }
-                
-                // Construire un message d'erreur plus informatif
-                const fullErrorMsg = errorDetails?.stack 
+
+                const fullErrorMsg = errorDetails?.stack
                     ? `${errorMsg}\n\nDétails techniques (mode développement):\n${errorDetails.stack}`
                     : errorMsg;
-                    
+
                 throw new Error(fullErrorMsg);
             }
-            
-            // Maintenant parser le JSON seulement si la réponse est OK
+
             let json: any = {};
             try {
                 json = text ? JSON.parse(text) : {};
             } catch (e) {
                 console.error("Réponse non JSON de /api/precontracts:", text);
                 throw new Error(
-                    `Réponse invalide du serveur (attendu JSON): ${text.slice(
-                        0,
-                        200
-                    )}`
+                    `Réponse invalide du serveur (attendu JSON): ${text.slice(0, 200)}`
                 );
             }
 
-            const { id, key, h_circuit, h_ct } = json;
+            const { id, h_circuit, h_ct } = json;
 
-            alert(
-                `Added new contract with ID ${id}. The encryption key is: ${key}`
-            );
             localStorage.setItem(`h_circuit_${id}`, h_circuit);
             localStorage.setItem(`h_ct_${id}`, h_ct);
-            localStorage.setItem(`key_${id}`, key);
+            localStorage.setItem(`key_${id}`, bytes_to_hex(key));
 
+            if (requestId !== undefined) {
+                await fetch(`/api/purchase-requests/${requestId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "fulfilled", contract_id: id }),
+                });
+            }
+
+            alert(`Added new contract with ID ${id}.`);
             window.dispatchEvent(new Event("reloadData"));
             onClose();
         } catch (e: any) {
+            setIsComputing(false);
             console.error("Erreur lors de la création du contrat:", e);
             alert(`Erreur: ${e.message || e.toString()}`);
         }
@@ -293,41 +327,63 @@ export default function NewContractModal({
     return (
         <Modal title={title} onClose={onClose}>
             <div className="space-y-4 grid grid-cols-2 gap-4">
-                <FormTextField
-                    id="buyer-pk"
-                    type="text"
-                    value={buyerPk}
-                    onChange={setBuyerPk}
-                >
-                    Buyer's public key
-                </FormTextField>
+                <div>
+                    <FormTextField
+                        id="buyer-pk"
+                        type="text"
+                        value={buyerPk}
+                        onChange={setBuyerPk}
+                    >
+                        Buyer's public key
+                    </FormTextField>
+                    {prefillBuyerPk && (
+                        <p className="text-xs text-blue-600 mt-1">
+                            Pre-filled from purchase request
+                        </p>
+                    )}
+                </div>
 
-                <FormTextField
-                    id="price"
-                    type="number"
-                    value={price}
-                    onChange={setPrice}
-                >
-                    Price
-                </FormTextField>
+                <div>
+                    <FormTextField
+                        id="price"
+                        type="number"
+                        value={price}
+                        onChange={setPrice}
+                    >
+                        Price (ETH)
+                    </FormTextField>
+                    {ethToCHF(price, ethChfRate) && (
+                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(price, ethChfRate)} CHF</p>
+                    )}
+                </div>
 
-                <FormTextField
-                    id="tip-completion"
-                    type="number"
-                    value={tipCompletion}
-                    onChange={setTipCompletion}
-                >
-                    Tip for completion
-                </FormTextField>
+                <div>
+                    <FormTextField
+                        id="tip-completion"
+                        type="number"
+                        value={tipCompletion}
+                        onChange={setTipCompletion}
+                    >
+                        Tip for completion (ETH)
+                    </FormTextField>
+                    {ethToCHF(tipCompletion, ethChfRate) && (
+                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(tipCompletion, ethChfRate)} CHF</p>
+                    )}
+                </div>
 
-                <FormTextField
-                    id="tip-dispute"
-                    type="number"
-                    value={tipDispute}
-                    onChange={setTipDispute}
-                >
-                    Tip for dispute
-                </FormTextField>
+                <div>
+                    <FormTextField
+                        id="tip-dispute"
+                        type="number"
+                        value={tipDispute}
+                        onChange={setTipDispute}
+                    >
+                        Tip for dispute (ETH)
+                    </FormTextField>
+                    {ethToCHF(tipDispute, ethChfRate) && (
+                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(tipDispute, ethChfRate)} CHF</p>
+                    )}
+                </div>
 
                 <FormTextField
                     id="timeout-delay"
@@ -380,8 +436,13 @@ export default function NewContractModal({
                 )}
 
                 <div className="col-span-2 flex gap-8">
-                    <Button label="Submit" onClick={handleSubmit} width="1/2" />
-                    <Button label="Cancel" onClick={onClose} width="1/2" />
+                    <Button
+                        label={isComputing ? "Encrypting..." : "Submit"}
+                        onClick={handleSubmit}
+                        width="1/2"
+                        isDisabled={isComputing}
+                    />
+                    <Button label="Cancel" onClick={onClose} width="1/2" isDisabled={isComputing} />
                 </div>
             </div>
         </Modal>

@@ -134,9 +134,9 @@ export async function deployOptimisticContract(
             entryPoint,      // _entryPoint
             pkVendor,        // _vendor
             pkBuyer,         // _buyer
-            price,           // _agreedPrice
-            completionTip,   // _completionTip
-            disputeTip,      // _disputeTip
+            parseEther(price.toString()),           // _agreedPrice
+            parseEther(completionTip.toString()),   // _completionTip
+            parseEther(disputeTip.toString()),      // _disputeTip
             timeoutIncrement, // _timeoutIncrement
             commitment,      // _commitment
             numBlocks,       // _numBlocks
@@ -525,7 +525,7 @@ export async function sendPayment(
         throw new Error("Private key not found for payer address");
     }
     const mode = options?.mode ?? "direct";
-    const amountWei = BigInt(amount);
+    const amountWei = parseEther(amount.toString());
     
     // Vérifier l'état du contrat, l'adresse du buyer et le montant requis avant d'envoyer
     const currentState = await contract.currState();
@@ -625,7 +625,7 @@ export async function sendPayment(
     
     try {
         const tx = await (contract.connect(wallet) as Contract).sendPayment({
-            value: amount,
+            value: amountWei,
         });
         
         if (options?.waitForReceipt) {
@@ -657,7 +657,7 @@ export async function sendPayment(
         if (buyer.toLowerCase() !== payerAddr.toLowerCase()) {
             errorMessage += `\n\n❌ PROBLÈME DÉTECTÉ: L'adresse du payer (${payerAddr}) ne correspond pas au buyer du contrat (${buyer}).`;
         }
-        if (BigInt(amount) < requiredAmount) {
+        if (amountWei < requiredAmount) {
             errorMessage += `\n\n❌ PROBLÈME DÉTECTÉ: Le montant fourni (${amount}) est insuffisant. Montant requis: ${requiredAmount.toString()}`;
         }
         if (currentState !== 0n) {

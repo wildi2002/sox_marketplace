@@ -7,6 +7,7 @@ import {
     DISPUTE_STATES,
     OPTIMISTIC_STATES,
 } from "./OngoingContractsListView";
+import { useToast } from "@/app/lib/ToastContext";
 import { useEffect, useState } from "react";
 import {
     getBasicInfo,
@@ -30,6 +31,8 @@ import {
     getDisputeState,
 } from "@/app/lib/blockchain/dispute";
 import { downloadFile, fileToBytes, openFile } from "@/app/lib/helpers";
+import { formatEther } from "ethers";
+import ChfNote from "../common/ChfNote";
 import init, {
     bytes_to_hex,
     check_received_ct_key,
@@ -61,6 +64,11 @@ function timestampToString(timestamp: bigint) {
     })}`;
 }
 
+const formatWei = (v: any): string => {
+    if (v === "Loading..." || v === null || v === undefined) return String(v);
+    try { return formatEther(BigInt(String(v))); } catch { return String(v); }
+};
+
 // I'm so sorry for this code, I don't have time to refactor it properly before
 // submitting it :((
 
@@ -69,6 +77,7 @@ export default function OngoingContractModal({
     contract,
     publicKey,
 }: OngoingContractModalProps) {
+    const { showToast } = useToast();
     if (!contract) return;
 
     const {
@@ -86,6 +95,7 @@ export default function OngoingContractModal({
         pk_sv,
         num_blocks,
         num_gates,
+        file_name,
     } = contract;
 
     const [key, setKey] = useState("Loading...");
@@ -288,7 +298,7 @@ export default function OngoingContractModal({
                     return (
                         <div className="flex flex-col gap-2 w-full">
                             <Button
-                                label={`Pay ${paymentAmount} wei`}
+                                label={`Pay ${formatWei(paymentAmount)} ETH`}
                                 onClick={clickSendPayment}
                                 isDisabled={paymentBusy}
                             />
@@ -398,7 +408,7 @@ export default function OngoingContractModal({
                 setPaymentTxHash(res.transactionHash);
                 setPaymentStatus("confirmed");
                 console.log("✅ Paiement confirmé (transaction directe)");
-                alert("Payment has been transferred");
+                showToast("Zahlung wurde übertragen.", "success");
                 // Rafraîchir les données et fermer après un délai
                 setTimeout(() => {
                     window.dispatchEvent(new Event("reloadData"));
@@ -413,7 +423,7 @@ export default function OngoingContractModal({
                 if (res.receipt) {
                     setPaymentStatus("confirmed");
                     console.log("✅ Paiement confirmé (EIP-7702)");
-                    alert("Payment has been transferred");
+                    showToast("Zahlung wurde übertragen.", "success");
                     setTimeout(() => {
                         window.dispatchEvent(new Event("reloadData"));
                         onClose();
@@ -434,7 +444,7 @@ export default function OngoingContractModal({
             setPaymentError(errorMessage);
             
             // Afficher l'erreur à l'utilisateur
-            alert(`Erreur lors du paiement: ${errorMessage}`);
+            showToast(`Fehler bei der Zahlung: ${errorMessage}`, "error");
             
             // NE PAS fermer le modal en cas d'erreur pour que l'utilisateur puisse voir l'erreur
             // et réessayer si nécessaire
@@ -459,7 +469,7 @@ export default function OngoingContractModal({
             
             if (userOpHash) {
                 // Attendre la confirmation de la UserOperation
-                alert(`Clé envoyée! Hash: ${userOpHash.substring(0, 20)}...\nEn attente de confirmation...`);
+                showToast(`Schlüssel gesendet! Hash: ${userOpHash.substring(0, 20)}…\nWarte auf Bestätigung…`, "info");
                 
                 try {
                     const { waitForUserOperationReceipt } = await import("@/app/lib/blockchain/userops");
@@ -496,13 +506,9 @@ export default function OngoingContractModal({
                         keyCheckMessage = "\n⚠️ Impossible de vérifier la clé on-chain.";
                     }
                     if (receipt?.receipt?.transactionHash) {
-                        alert(
-                            `Clé envoyée et confirmée! Transaction: ${receipt.receipt.transactionHash.substring(0, 20)}...${keyCheckMessage}`
-                        );
+                        showToast(`Schlüssel bestätigt! Tx: ${receipt.receipt.transactionHash.substring(0, 20)}…${keyCheckMessage}`, "success");
                     } else {
-                        alert(
-                            `Clé envoyée et confirmée! Hash UserOp: ${userOpHash.substring(0, 20)}...${keyCheckMessage}`
-                        );
+                        showToast(`Schlüssel bestätigt! UserOp: ${userOpHash.substring(0, 20)}…${keyCheckMessage}`, "success");
                     }
                     
                     // Rafraîchir les données après confirmation
@@ -517,15 +523,9 @@ export default function OngoingContractModal({
                     const waitErrorMessage = waitError?.message || waitError?.toString() || "Erreur inconnue";
                     
                     // La UserOperation a été envoyée, même si on ne peut pas attendre la confirmation
-                    alert(
-                        `Clé envoyée au bundler (Hash: ${userOpHash.substring(0, 20)}...)\n\n` +
-                        `⚠️ ATTENTION: La UserOperation n'a pas encore été confirmée.\n` +
-                        `Raison: ${waitErrorMessage}\n\n` +
-                        `Vérifications à faire:\n` +
-                        `1. Vérifier si le dépôt EntryPoint est suffisant\n` +
-                        `2. Vérifier si le bundler inclut bien les UserOperations\n` +
-                        `3. Vérifier les logs du bundler pour plus de détails\n\n` +
-                        `Les données seront rafraîchies automatiquement une fois confirmée.`
+                    showToast(
+                        `Schlüssel an Bundler gesendet (${userOpHash.substring(0, 20)}…)\n⚠️ Noch nicht bestätigt.\nGrund: ${waitErrorMessage}`,
+                        "warning", 8000
                     );
                     
                     // Planifier un rafraîchissement périodique pour vérifier si la clé est finalement confirmée
@@ -610,7 +610,7 @@ export default function OngoingContractModal({
                         "The received file seems correct, download the decrypted file ?"
                     )
                 ) {
-                    downloadFile(decrypted_file, "decrypted_file");
+                    downloadFile(decrypted_file, file_name || "decrypted_file");
                 }
             } else {
                 if (
@@ -618,7 +618,7 @@ export default function OngoingContractModal({
                         "The received file does NOT seem correct, download anyway ?"
                     )
                 ) {
-                    downloadFile(decrypted_file, "decrypted_file");
+                    downloadFile(decrypted_file, file_name || "decrypted_file");
                 }
             }
         } catch {
@@ -1342,25 +1342,30 @@ export default function OngoingContractModal({
                             {item_description}
                         </div>
                         <div>
-                            <strong>Completion tip:</strong> {completionTip} wei
+                            <strong>Completion tip:</strong> {formatWei(completionTip)} ETH
+                            <ChfNote value={formatWei(completionTip)} />
                         </div>
                         <div>
-                            <strong>Dispute tip:</strong> {disputeTip} wei
+                            <strong>Dispute tip:</strong> {formatWei(disputeTip)} ETH
+                            <ChfNote value={formatWei(disputeTip)} />
                         </div>
                         <div>
-                            <strong>Sponsor deposit:</strong> {sponsorDeposit}{" "}
-                            wei
+                            <strong>Sponsor deposit:</strong> {formatWei(sponsorDeposit)} ETH
+                            <ChfNote value={formatWei(sponsorDeposit)} />
                         </div>
                         <div>
-                            <strong>Buyer deposit:</strong> {buyerDeposit} wei
+                            <strong>Buyer deposit:</strong> {formatWei(buyerDeposit)} ETH
+                            <ChfNote value={formatWei(buyerDeposit)} />
                         </div>
                         <div>
                             <strong>Buyer dispute sponsor deposit:</strong>{" "}
-                            {bSponsorDeposit} wei
+                            {formatWei(bSponsorDeposit)} ETH
+                            <ChfNote value={formatWei(bSponsorDeposit)} />
                         </div>
                         <div>
                             <strong>Vendor dispute sponsor deposit:</strong>{" "}
-                            {vSponsorDeposit} wei
+                            {formatWei(vSponsorDeposit)} ETH
+                            <ChfNote value={formatWei(vSponsorDeposit)} />
                         </div>
                         {!!dispute_smart_contract && (
                             <>
