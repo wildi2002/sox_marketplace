@@ -536,7 +536,7 @@ export default function OngoingContractModal({
                             if (receipt) {
                                 clearInterval(checkInterval);
                                 console.log("✅ UserOperation confirmée après attente:", receipt);
-                                alert(`✅ Clé confirmée! Transaction: ${receipt?.receipt?.transactionHash?.substring(0, 20) || userOpHash.substring(0, 20)}...`);
+                                showToast(`Schlüssel bestätigt! Tx: ${receipt?.receipt?.transactionHash?.substring(0, 20) || userOpHash.substring(0, 20)}…`, "success");
                                 window.dispatchEvent(new Event("reloadData"));
                                 refreshContractData();
                             }
@@ -553,7 +553,7 @@ export default function OngoingContractModal({
                     window.dispatchEvent(new Event("reloadData"));
                 }
             } else {
-                alert("Clé envoyée avec succès!");
+                showToast("Schlüssel erfolgreich gesendet!", "success");
                 window.dispatchEvent(new Event("reloadData"));
             }
             
@@ -565,10 +565,10 @@ export default function OngoingContractModal({
             
             // Si l'erreur est "Already known", c'est que la UserOperation est déjà dans le mempool
             if (errorMessage.includes("Already known") || errorMessage.includes("already known")) {
-                alert(`La clé est déjà en cours d'envoi (UserOperation déjà soumise au bundler).\n\nLes données seront rafraîchies automatiquement une fois la transaction confirmée.`);
+                showToast("Schlüssel wird bereits gesendet (UserOperation bereits beim Bundler). Daten werden automatisch aktualisiert.", "info", 6000);
                 window.dispatchEvent(new Event("reloadData"));
             } else {
-                alert(`Erreur lors de l'envoi de la clé: ${errorMessage}`);
+                showToast(`Fehler beim Senden des Schlüssels: ${errorMessage}`, "error");
             }
         }
     };
@@ -607,7 +607,7 @@ export default function OngoingContractModal({
             if (success) {
                 if (
                     confirm(
-                        "The received file seems correct, download the decrypted file ?"
+                        "Die Datei scheint korrekt zu sein. Entschlüsselte Datei herunterladen?"
                     )
                 ) {
                     downloadFile(decrypted_file, file_name || "decrypted_file");
@@ -615,14 +615,14 @@ export default function OngoingContractModal({
             } else {
                 if (
                     confirm(
-                        "The received file does NOT seem correct, download anyway ?"
+                        "Die Datei scheint NICHT korrekt zu sein. Trotzdem herunterladen?"
                     )
                 ) {
                     downloadFile(decrypted_file, file_name || "decrypted_file");
                 }
             }
         } catch {
-            alert("Something went wrong during decryption");
+            showToast("Fehler bei der Entschlüsselung.", "error");
         }
     };
 
@@ -649,7 +649,7 @@ export default function OngoingContractModal({
             downloadFile(ctBytes, `contract_${id}_ciphertext.enc`);
         } catch (error: any) {
             const errorMessage = error?.message || error?.toString() || "Erreur inconnue";
-            alert(`Erreur lors du téléchargement du fichier chiffré: ${errorMessage}`);
+            showToast(`Fehler beim Herunterladen der verschlüsselten Datei: ${errorMessage}`, "error");
         }
     };
 
@@ -657,11 +657,11 @@ export default function OngoingContractModal({
         await init();
         try {
             await endOptimisticTimeout(optimistic_smart_contract!, publicKey);
-            alert("Transaction completed successfully");
+            showToast("Transaktion erfolgreich abgeschlossen.", "success");
             onClose();
             window.dispatchEvent(new Event("reloadData"));
         } catch (error: any) {
-            alert(`Error: ${error.message || error}`);
+            showToast(`Fehler: ${error.message || error}`, "error");
         }
     };
 
@@ -670,7 +670,7 @@ export default function OngoingContractModal({
 
         let file;
         let ct: Uint8Array | undefined = undefined;
-        if (confirm("Do you want to select a file ?")) {
+        if (confirm("Möchtest du eine Datei auswählen?")) {
             file = await openFile();
         }
         if (file) ct = await fileToBytes(file);
@@ -702,7 +702,7 @@ export default function OngoingContractModal({
             }),
         });
         onClose();
-        alert("Argument posted!");
+        showToast("Argument eingereicht!", "success");
     };
 
     const clickVendorPostArgument = async () => {
@@ -742,7 +742,7 @@ export default function OngoingContractModal({
             }),
         });
         onClose();
-        alert("Argument posted!");
+        showToast("Argument eingereicht!", "success");
     };
 
     /*
@@ -827,7 +827,7 @@ export default function OngoingContractModal({
             bytes_to_hex(response)
         );
         onClose();
-        alert(`Response sent for challenge ${challenge}`);
+        showToast(`Antwort für Challenge ${challenge} gesendet.`, "success");
     };
 
     const clickGiveOpinion = async () => {
@@ -848,9 +848,9 @@ export default function OngoingContractModal({
 
         await giveOpinion(publicKey, dispute_smart_contract!, opinion);
         if (opinion) {
-            alert("Agreed");
+            showToast("Zugestimmt.", "success");
         } else {
-            alert("Disagreed");
+            showToast("Nicht zugestimmt.", "info");
         }
         onClose();
     };
@@ -921,7 +921,7 @@ export default function OngoingContractModal({
                     dispute_smart_contract!
                 );
 
-                alert(`✅ Preuves envoyées et confirmées!\n\nHash: ${userOpHash.slice(0, 20)}...`);
+                showToast(`Beweise gesendet und bestätigt!\nHash: ${userOpHash.slice(0, 20)}…`, "success");
             } else if (actualState == 3) {
                 console.log("📤 Envoi des preuves left (état 3: WaitVendorDataLeft)");
                 const { gate_bytes, values, curr_acc, proof1, proof2, proof_ext } =
@@ -977,7 +977,7 @@ export default function OngoingContractModal({
                     publicKey,
                     dispute_smart_contract!
                 );
-                alert(`✅ TEST: Transaction directe envoyée!\n\nHash: ${txHash.slice(0, 20)}...`);
+                showToast(`Direkte Transaktion gesendet!\nHash: ${txHash.slice(0, 20)}…`, "success");
             } else if (actualState == 4) {
                 console.log("📤 Envoi des preuves right (état 4: WaitVendorDataRight)");
                 console.log(`📊 Paramètres: num_blocks=${num_blocks}, num_gates=${num_gates}`);
@@ -1045,7 +1045,7 @@ export default function OngoingContractModal({
                         dispute_smart_contract!
                     );
                     console.log("✅ submitCommitmentRight réussi");
-                    alert(`✅ Preuves envoyées et confirmées!\n\nHash: ${userOpHash.slice(0, 20)}...`);
+                    showToast(`Beweise gesendet und bestätigt!\nHash: ${userOpHash.slice(0, 20)}…`, "success");
                 } catch (err: any) {
                     console.error("❌ Erreur dans état 4:", err);
                     console.error("Type:", typeof err, "Constructor:", err?.constructor?.name);
@@ -1054,20 +1054,14 @@ export default function OngoingContractModal({
                     throw new Error(`Erreur lors de l'envoi des preuves (état 4): ${errorMsg}`);
                 }
             } else if (actualState === 5) {
-                // État Complete: La dispute est terminée, le vendor a gagné
-                alert(`✅ La dispute est terminée (Complete). Le vendor a gagné.`);
-                console.log(`✅ Dispute terminée (Complete). État: ${actualState}`);
+                showToast("Streitfall abgeschlossen (Complete). Der Verkäufer hat gewonnen.", "info");
             } else if (actualState === 6) {
-                // État Cancel: La dispute est terminée, le buyer a gagné
-                alert(`✅ La dispute est terminée (Cancel). Le buyer a gagné.`);
-                console.log(`✅ Dispute terminée (Cancel). État: ${actualState}`);
+                showToast("Streitfall abgeschlossen (Cancel). Der Käufer hat gewonnen.", "info");
             } else if (actualState === 7) {
-                // État End: La dispute est terminée
-                alert(`✅ La dispute est terminée (End).`);
-                console.log(`✅ Dispute terminée (End). État: ${actualState}`);
+                showToast("Streitfall abgeschlossen (End).", "info");
             } else {
-                alert(`État inattendu: ${actualState}. État attendu: 2, 3 ou 4.`);
-                console.error(`État inattendu: ${actualState}. État local: ${state}`);
+                showToast(`Unerwarteter Zustand: ${actualState}. Erwartet: 2, 3 oder 4.`, "warning");
+                console.error(`Unerwarteter Zustand: ${actualState}. Lokaler Zustand: ${state}`);
             }
             
             // Rafraîchir l'état après l'envoi
@@ -1128,13 +1122,13 @@ export default function OngoingContractModal({
                 }
             }
             
-            alert(`❌ Erreur lors de l'envoi des preuves:\n\n${errorMessage}\n\nDétails complets dans la console (F12).`);
+            showToast(`Fehler beim Senden der Beweise:\n${errorMessage}`, "error", 8000);
         }
     };
 
     const clickFinishDispute = async () => {
         await finishDispute(state, publicKey, dispute_smart_contract!);
-        alert("Dispute finished");
+        showToast("Streitfall abgeschlossen.", "success");
         onClose();
     };
 
@@ -1151,7 +1145,7 @@ export default function OngoingContractModal({
     const getEvaluatedCircuit = async () => {
         let ct_file;
 
-        if (confirm("Do you want to select the encrypted file (ciphertext) ?")) {
+        if (confirm("Möchtest du die verschlüsselte Datei (Ciphertext) auswählen?")) {
             ct_file = await openFile();
         }
 
@@ -1198,7 +1192,7 @@ export default function OngoingContractModal({
         let ct_file: File | null = null;
         let ct: Uint8Array;
 
-        if (confirm("Do you want to select the encrypted file (ciphertext) ?")) {
+        if (confirm("Möchtest du die verschlüsselte Datei (Ciphertext) auswählen?")) {
             ct_file = await openFile();
         }
 

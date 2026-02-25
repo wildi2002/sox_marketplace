@@ -5,11 +5,10 @@ import { useEffect, useState } from "react";
 import Modal from "../common/Modal";
 import SponsorModal from "./SponsorModal";
 import DisputeSimulationModal from "./DisputeSimulationModal";
-import FormSelect from "../common/FormSelect";
-import { ALL_PUBLIC_KEYS } from "@/app/lib/blockchain/config";
 import init, { check_argument, hex_to_bytes } from "@/app/lib/crypto_lib";
 import ChfNote from "../common/ChfNote";
 import { useToast } from "@/app/lib/ToastContext";
+import { useUser } from "@/app/lib/UserContext";
 import {
     getBasicInfo,
     sendSbFee,
@@ -31,13 +30,13 @@ type Dispute = {
 };
 
 export default function DisputeListView() {
+    const { user } = useUser();
     const [modalProofShown, showModalProof] = useState(false);
     const [modalSponsorShown, showModalSponsor] = useState(false);
     const [modalSimulationShown, showModalSimulation] = useState(false);
     const [sponsorType, setSponsorType] = useState<"buyer" | "vendor" | null>(null);
     const [disputes, setDisputes] = useState<Dispute[]>([]);
     const [selectedDispute, setSelectedDispute] = useState<Dispute>();
-    const [publicKey, setPublicKey] = useState<string>(ALL_PUBLIC_KEYS[0]);
     const { showToast } = useToast();
 
     const fetchDisputes = () => {
@@ -104,7 +103,7 @@ export default function DisputeListView() {
             : !!selectedDispute.pk_vendor_sponsor;
 
         if (alreadyRegistered) {
-            showToast(`Der ${sponsorType === "buyer" ? "Käufer" : "Verkäufer"}-Sponsor ist für diesen Vertrag bereits registriert.`, "warning");
+            showToast(`The ${sponsorType === "buyer" ? "buyer" : "vendor"} sponsor is already registered for this contract.`, "warning");
             return;
         }
 
@@ -121,9 +120,9 @@ export default function DisputeListView() {
         }
 
         showToast(
-            `${sponsorType === "buyer" ? "Käufer" : "Verkäufer"}-Sponsor für Vertrag ${selectedDispute.contract_id} registriert!${
+            `${sponsorType === "buyer" ? "Buyer" : "Vendor"} sponsor for contract ${selectedDispute.contract_id} registered!${
                 isVendor && disputeContractAddress
-                    ? `\nDisput-Vertrag deployed: ${disputeContractAddress}`
+                    ? `\nDispute contract deployed: ${disputeContractAddress}`
                     : ""
             }`, "success"
         );
@@ -135,7 +134,7 @@ export default function DisputeListView() {
         await init();
 
         if (!selectedDispute) {
-            showToast("Ein unerwarteter Fehler ist aufgetreten.", "error");
+            showToast("An unexpected error occurred.", "error");
             showModalProof(false);
             return;
         }
@@ -173,30 +172,30 @@ export default function DisputeListView() {
 
             // yandere dev core
             if (result.error) {
-                showToast(`Fehler: ${result.error}`, "error");
+                showToast(`Error: ${result.error}`, "error");
             } else if (!result.is_valid) {
                 showToast(
-                    `Argument ist UNGÜLTIG!\nDer ${isVendor ? "Verkäufer" : "Käufer"} könnte gelogen haben.`,
+                    `Argument is INVALID!\nThe ${isVendor ? "vendor" : "buyer"} may have lied.`,
                     "error"
                 );
             } else if (result.supports_buyer) {
                 showToast(
                     isVendor
-                        ? "Verkäufer hat ein Argument eingereicht, das ihn NICHT unterstützt!"
-                        : "Käufer hat ein Argument eingereicht, das ihn unterstützt.",
+                        ? "Vendor submitted an argument that does NOT support them!"
+                        : "Buyer submitted an argument that supports them.",
                     isVendor ? "error" : "success"
                 );
             } else {
                 showToast(
                     isVendor
-                        ? "Verkäufer hat ein Argument eingereicht, das ihn unterstützt."
-                        : "Käufer hat ein Argument eingereicht, das ihn NICHT unterstützt!",
+                        ? "Vendor submitted an argument that supports them."
+                        : "Buyer submitted an argument that does NOT support them!",
                     isVendor ? "success" : "error"
                 );
             }
         } catch (error: any) {
             console.error("Error checking argument:", error);
-            showToast(`Fehler bei der Argumentprüfung: ${error?.message || "Unbekannter Fehler"}`, "error");
+            showToast(`Error verifying argument: ${error?.message || "Unknown error"}`, "error");
         } finally {
             showModalProof(false);
         }
@@ -235,7 +234,7 @@ export default function DisputeListView() {
             );
         } catch (error: any) {
             console.error("Error downloading argument:", error);
-            showToast(`Fehler beim Herunterladen des Arguments: ${error?.message || "Unbekannter Fehler"}`, "error");
+            showToast(`Error downloading argument: ${error?.message || "Unknown error"}`, "error");
         }
     };
 
@@ -252,7 +251,7 @@ export default function DisputeListView() {
                         <th className="p-2 w-28">Tip</th>
                         <th className="p-2">Buyer Sponsor</th>
                         <th className="p-2">Vendor Sponsor</th>
-                        <th className="p-2 w-32">Check</th>
+                        <th className="p-2 w-32">Verify</th>
                         <th className="p-2 w-24">Download</th>
                         <th className="p-2 w-24">Simulate</th>
                     </tr>
@@ -297,7 +296,7 @@ export default function DisputeListView() {
                             </td>
                             <td className="p-2 text-center">
                                 <Button
-                                    label="Check argument"
+                                    label="Verify Argument"
                                     onClick={() => {
                                         setSelectedDispute(d);
                                         showModalProof(true);
@@ -333,11 +332,11 @@ export default function DisputeListView() {
             {modalProofShown && (
                 <Modal
                     onClose={() => showModalProof(false)}
-                    title="Check argument"
+                    title="Verify Argument"
                 >
                     <div className="flex gap-8 justify-between items-center">
                         <Button
-                            label="Check here"
+                            label="Verify here"
                             onClick={handleClickCheckArgument}
                         />
                     </div>
@@ -354,13 +353,15 @@ export default function DisputeListView() {
 
             {modalSponsorShown && sponsorType && (
                 <SponsorModal
-                    title={`Sponsor for ${sponsorType === "buyer" ? "Buyer" : "Vendor"}`}
+                    title={`Sponsor for ${sponsorType === "buyer" ? "buyer" : "vendor"}`}
                     onClose={() => {
                         showModalSponsor(false);
                         setSponsorType(null);
                     }}
                     onConfirm={handleSponsorConfirmation}
                     id_prefix={`dispute-${sponsorType}`}
+                    defaultPk={user?.publicKey ?? ""}
+                    tip={selectedDispute?.tip_dispute}
                 />
             )}
 
@@ -372,7 +373,7 @@ export default function DisputeListView() {
                     }}
                     disputeContract={selectedDispute.dispute_smart_contract}
                     optimisticContract={selectedDispute.optimistic_smart_contract}
-                    publicKey={publicKey || selectedDispute.pk_buyer_sponsor || selectedDispute.pk_vendor_sponsor || ""}
+                    publicKey={user?.publicKey || selectedDispute.pk_buyer_sponsor || selectedDispute.pk_vendor_sponsor || ""}
                     pkBuyer={selectedDispute.pk_buyer}
                     pkVendor={selectedDispute.pk_vendor}
                     numBlocks={selectedDispute.num_blocks}

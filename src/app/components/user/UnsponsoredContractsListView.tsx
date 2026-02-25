@@ -3,6 +3,7 @@
 import Button from "../common/Button";
 import { useEffect, useState } from "react";
 import ChfNote from "../common/ChfNote";
+import { useToast } from "@/app/lib/ToastContext";
 
 type Contract = {
     id: number;
@@ -27,6 +28,7 @@ interface UnsponsoredContractsListViewProps {
 export default function UnsponsoredContractsListView({
     publicKey,
 }: UnsponsoredContractsListViewProps) {
+    const { showToast } = useToast();
     const [contracts, setContracts] = useState<Contract[]>([]);
 
     const fetchContracts = () => {
@@ -43,11 +45,9 @@ export default function UnsponsoredContractsListView({
         ).json();
 
         if (response.success)
-            alert(`Unsponsored contract ${id} successfully deleted`);
+            showToast(`Contract ${id} deleted successfully.`, "success");
         else
-            alert(
-                "Something wrong happened when deleting the unsponsored contract"
-            );
+            showToast("Error deleting contract.", "error");
 
         window.dispatchEvent(new Event("reloadData"));
     };
@@ -69,7 +69,7 @@ export default function UnsponsoredContractsListView({
         <>
             <div className="bg-gray-300 p-4 rounded w-1/2 overflow-auto">
                 <h2 className="text-lg font-semibold mb-4">
-                    Unsponsored contracts
+                    Unsponsored Contracts
                 </h2>
 
                 <table className="w-full table-fixed border-collapse">

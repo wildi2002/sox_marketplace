@@ -63,7 +63,7 @@ export default function NonAcceptedPrecontractsListView({
         <>
             <div className="bg-gray-300 p-4 rounded w-1/2 overflow-auto">
                 <h2 className="text-lg font-semibold mb-4">
-                    Non accepted precontracts
+                    Pending Precontracts
                 </h2>
 
                 <table className="w-full table-fixed border-collapse">
@@ -84,7 +84,7 @@ export default function NonAcceptedPrecontractsListView({
                                 <td className="p-2 w-1/3">{c.pk_vendor}</td>
                                 <td className="p-2 w-1/3 text-center">
                                     <Button
-                                        label="Show details"
+                                        label="View Details"
                                         onClick={() => handleShowDetails(c)}
                                         width="95/100"
                                     />

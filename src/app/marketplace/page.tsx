@@ -39,11 +39,11 @@ export default function MarketplacePage() {
 
     const handleRequest = async (listing: Listing) => {
         if (!user) {
-            showToast("Bitte zuerst einloggen", "warning");
+            showToast("Please log in first", "warning");
             return;
         }
         if (listing.pk_vendor.toLowerCase() === user.publicKey.toLowerCase()) {
-            showToast("Du kannst dein eigenes Angebot nicht kaufen", "warning");
+            showToast("You can't buy your own listing", "warning");
             return;
         }
 
@@ -56,10 +56,10 @@ export default function MarketplacePage() {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
-            showToast("Kaufanfrage gesendet! Der Verkäufer wird die Datei verschlüsseln und dir den Vertrag zur Prüfung senden.", "success", 7000);
+            showToast("Purchase request sent! The vendor will encrypt the file and send you the contract for review.", "success", 7000);
             await fetchListings();
         } catch (e: any) {
-            showToast(`Fehler: ${e.message}`, "error");
+            showToast(`Error: ${e.message}`, "error");
         } finally {
             setRequesting(null);
         }
@@ -100,7 +100,7 @@ export default function MarketplacePage() {
                     <p className="text-xl mb-2">No listings found.</p>
                     <p className="text-sm">
                         {listings.length === 0
-                            ? "Log in as a user and go to your dashboard to post a listing."
+                            ? "Log in and go to your dashboard to create a listing."
                             : "Try a different search term."}
                     </p>
                 </div>
@@ -119,7 +119,7 @@ export default function MarketplacePage() {
                                     </p>
                                 )}
                                 <p className="text-xs text-gray-400 font-mono mb-1">
-                                    Seller: {listing.pk_vendor.slice(0, 10)}…{listing.pk_vendor.slice(-6)}
+                                    Vendor: {listing.pk_vendor.slice(0, 10)}…{listing.pk_vendor.slice(-6)}
                                 </p>
                                 {listing.tip_completion > 0 && (
                                     <p className="text-xs text-gray-400">
@@ -144,7 +144,7 @@ export default function MarketplacePage() {
                                     <span className="text-xs text-gray-400">Log in to buy</span>
                                 ) : (
                                     <Button
-                                        label={requesting === listing.id ? "Requesting…" : "Request to Buy"}
+                                        label={requesting === listing.id ? "Sending request…" : "Send request"}
                                         onClick={() => handleRequest(listing)}
                                         width="auto"
                                         isDisabled={requesting === listing.id}

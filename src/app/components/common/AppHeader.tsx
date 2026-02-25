@@ -10,17 +10,17 @@ export default function AppHeader() {
 
     if (!user) return null;
 
-    const navBtn = (label: string, href: string) => {
+    const navBtn = (label: string, href: string, color: "green" | "purple" = "green") => {
         const active = pathname === href;
+        const activeClass = color === "purple"
+            ? "bg-purple-100 text-purple-800 font-medium"
+            : "bg-green-100 text-green-800 font-medium";
+        const inactiveClass = "text-gray-600 hover:bg-gray-100";
         return (
             <button
                 key={href}
                 onClick={() => router.push(href)}
-                className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                    active
-                        ? "bg-blue-100 text-blue-800 font-medium"
-                        : "text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`px-3 py-1.5 text-sm rounded transition-colors ${active ? activeClass : inactiveClass}`}
             >
                 {label}
             </button>
@@ -39,28 +39,15 @@ export default function AppHeader() {
                     SOX
                 </span>
                 <nav className="flex gap-1">
-                    {user.role === "user" && (
-                        <>
-                            {navBtn("Marketplace", "/marketplace")}
-                            {navBtn("My Dashboard", "/user")}
-                            {navBtn("My Listings", "/listings")}
-                            {navBtn("Account", "/account")}
-                        </>
-                    )}
-                    {user.role === "sponsor" && navBtn("Sponsor Dashboard", "/sponsor")}
+                    {navBtn("Marketplace", "/marketplace")}
+                    {navBtn("My Dashboard", "/user")}
+                    {navBtn("My Listings", "/listings")}
+                    {navBtn("Sponsor", "/sponsor", "purple")}
+                    {navBtn("Account", "/account")}
                 </nav>
             </div>
 
             <div className="flex items-center gap-3">
-                <span
-                    className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        user.role === "user"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-purple-100 text-purple-700"
-                    }`}
-                >
-                    {user.role === "user" ? "User" : "Sponsor"}
-                </span>
                 <span className="text-sm text-gray-700 hidden sm:block">
                     {displayName}
                 </span>

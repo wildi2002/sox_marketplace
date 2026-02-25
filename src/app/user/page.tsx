@@ -18,10 +18,9 @@ export default function UserDashboard() {
 
     useEffect(() => {
         if (!user) router.replace("/");
-        else if (user.role !== "user") router.replace("/sponsor");
     }, [user]);
 
-    if (!user || user.role !== "user") return null;
+    if (!user) return null;
 
     const publicKey = user.publicKey;
 
@@ -31,12 +30,12 @@ export default function UserDashboard() {
                 <h1 className="text-xl font-bold">My Dashboard</h1>
                 <div className="flex gap-3">
                     <Button
-                        label="+ New contract (direct)"
+                        label="+ New Contract (direct)"
                         onClick={() => showModalNewContract(true)}
                         width="auto"
                     />
                     <Button
-                        label="Reload data"
+                        label="Refresh"
                         onClick={() => window.dispatchEvent(new Event("reloadData"))}
                         width="auto"
                     />
@@ -58,7 +57,7 @@ export default function UserDashboard() {
 
             {modalNewContractShown && (
                 <NewContractModal
-                    title="New contract"
+                    title="New Contract"
                     vendorPk={publicKey}
                     onClose={() => showModalNewContract(false)}
                 />

@@ -14,10 +14,9 @@ export default function ListingsPage() {
 
     useEffect(() => {
         if (!user) router.replace("/");
-        else if (user.role !== "user") router.replace("/sponsor");
     }, [user]);
 
-    if (!user || user.role !== "user") return null;
+    if (!user) return null;
 
     return (
         <main className="p-4 min-h-screen">
@@ -25,12 +24,12 @@ export default function ListingsPage() {
                 <h1 className="text-xl font-bold">My Listings</h1>
                 <div className="flex gap-3">
                     <Button
-                        label="+ Post New Listing"
+                        label="+ New Listing"
                         onClick={() => showModalPostListing(true)}
                         width="auto"
                     />
                     <Button
-                        label="Reload data"
+                        label="Refresh"
                         onClick={() => window.dispatchEvent(new Event("reloadData"))}
                         width="auto"
                     />

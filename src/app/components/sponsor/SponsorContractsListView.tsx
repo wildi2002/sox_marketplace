@@ -20,6 +20,7 @@ export default function SponsorContractsListView() {
     const [modalShown, showModal] = useState(false);
     const [contracts, setContracts] = useState<Contract[]>([]);
     const [selectedContract, setSelectedContract] = useState(-1);
+    const [selectedTip, setSelectedTip] = useState<number | undefined>(undefined);
     const [isDeploying, setIsDeploying] = useState(false);
     const deployCancelledRef = useRef(false);
 
@@ -94,10 +95,10 @@ export default function SponsorContractsListView() {
 
             if (deployCancelledRef.current) return;
 
-            showToast(`Vertrag ${selectedContract} gesponsert!\nDeployed: ${contractAddress}`, "success", 7000);
+            showToast(`Contract ${selectedContract} sponsored!\nDeployed: ${contractAddress}`, "success", 7000);
         } catch (e: any) {
             console.error("Erreur de déploiement:", e);
-            showToast(`Fehler: ${e?.message || e?.toString()}`, "error");
+            showToast(`Error: ${e?.message || e?.toString()}`, "error");
         } finally {
             setIsDeploying(false);
         }
@@ -115,7 +116,7 @@ export default function SponsorContractsListView() {
                     <tr className="border-b border-black text-left font-medium">
                         <th className="p-2 w-1/5">ID</th>
                         <th className="p-2 w-1/5">Tip</th>
-                        <th className="p-2 w-1/5">Timeout delay</th>
+                        <th className="p-2 w-1/5">Timeout</th>
                         <th className="p-2 w-1/5"></th>
                     </tr>
                 </thead>
@@ -133,6 +134,7 @@ export default function SponsorContractsListView() {
                                     label="Sponsor"
                                     onClick={() => {
                                         setSelectedContract(c.id);
+                                        setSelectedTip(c.tip_completion);
                                         showModal(true);
                                     }}
                                     width="95/100"
@@ -145,11 +147,12 @@ export default function SponsorContractsListView() {
 
             {modalShown && (
                 <SponsorModal
-                    title="Sponsor contract"
+                    title="Sponsor Contract"
                     onClose={() => showModal(false)}
                     onConfirm={handleSponsorConfirmation}
                     id_prefix="contract"
-                    defaultPk={user?.publicKey}
+                    defaultPk={user?.publicKey ?? ""}
+                    tip={selectedTip}
                 />
             )}
 

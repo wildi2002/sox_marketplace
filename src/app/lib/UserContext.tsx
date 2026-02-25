@@ -2,17 +2,14 @@
 
 import { createContext, useContext, useState, ReactNode } from "react";
 
-export type Role = "user" | "sponsor";
-
 interface UserState {
     publicKey: string;
-    role: Role;
     username?: string;
 }
 
 interface UserContextType {
     user: UserState | null;
-    login: (publicKey: string, role: Role) => void;
+    login: (publicKey: string) => void;
     logout: () => void;
     setUsername: (name: string) => void;
 }
@@ -33,7 +30,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (!saved) return null;
             const parsed = JSON.parse(saved) as UserState;
-            // Always refresh username from per-key storage in case it changed
             const savedUsername = localStorage.getItem(`sox_username_${parsed.publicKey}`) || undefined;
             return { ...parsed, username: savedUsername };
         } catch {
@@ -41,9 +37,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
         }
     });
 
-    const login = (publicKey: string, role: Role) => {
+    const login = (publicKey: string) => {
         const savedUsername = localStorage.getItem(`sox_username_${publicKey}`) || undefined;
-        const state: UserState = { publicKey, role, username: savedUsername };
+        const state: UserState = { publicKey, username: savedUsername };
         setUser(state);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     };

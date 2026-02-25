@@ -3,6 +3,7 @@
 import Button from "../common/Button";
 import { useEffect, useState } from "react";
 import OngoingContractModal from "./OngoingContractModal";
+import { useToast } from "@/app/lib/ToastContext";
 import { getNextTimeout, getState } from "@/app/lib/blockchain/common";
 import { endDisputeTimeout } from "@/app/lib/blockchain/dispute";
 import { endOptimisticTimeout } from "@/app/lib/blockchain/optimistic";
@@ -48,7 +49,7 @@ export const OPTIMISTIC_STATES = [
     "Key available",
     "Waiting for vendor dispute sponsor",
     "In dispute",
-    "End",
+    "Completed",
 ];
 
 /*
@@ -63,13 +64,13 @@ export const OPTIMISTIC_STATES = [
 */
 export const DISPUTE_STATES = [
     "Waiting for buyer challenge response",
-    "Waiting for vendor's opinion on challenge response",
-    "Waiting for vendor's argument",
-    "Waiting for vendor's argument",
-    "Waiting for vendor's argument",
+    "Waiting for vendor opinion",
+    "Waiting for vendor argument",
+    "Waiting for vendor argument",
+    "Waiting for vendor argument",
     "Transaction completed, can be ended",
     "Transaction cancelled, can be ended",
-    "End",
+    "Completed",
 ];
 
 interface OngoingContractsListViewProps {
@@ -79,6 +80,7 @@ interface OngoingContractsListViewProps {
 export default function OngoingContractsListView({
     publicKey,
 }: OngoingContractsListViewProps) {
+    const { showToast } = useToast();
     const [contracts, setContracts] = useState<Contract[]>([]);
     const [displayedContract, setSelectedContract] = useState<Contract>();
     const [modalShown, showModal] = useState(false);
@@ -125,14 +127,14 @@ export default function OngoingContractsListView({
                 c.dispute_smart_contract!,
                 publicKey
             );
-            alert(`Dispute ${isCompleted ? "completed" : "cancelled"}`);
+            showToast(`Dispute ${isCompleted ? "completed" : "cancelled"}.`, isCompleted ? "success" : "info");
             window.dispatchEvent(new Event("reloadData"));
         } else {
             const isCompleted = await endOptimisticTimeout(
                 c.optimistic_smart_contract,
                 publicKey
             );
-            alert(`Transaction ${isCompleted ? "completed" : "cancelled"}`);
+            showToast(`Transaction ${isCompleted ? "completed" : "cancelled"}.`, isCompleted ? "success" : "info");
             window.dispatchEvent(new Event("reloadData"));
         }
     };
@@ -154,7 +156,7 @@ export default function OngoingContractsListView({
         <>
             <div className="bg-gray-300 p-4 rounded overflow-auto">
                 <h2 className="text-lg font-semibold mb-4">
-                    Ongoing contracts
+                    Ongoing Contracts
                 </h2>
 
                 <table className="w-full table-fixed border-collapse">
@@ -162,9 +164,9 @@ export default function OngoingContractsListView({
                         <tr className="border-b border-black text-left font-medium">
                             <th className="p-2 w-1/10">ID</th>
                             <th className="p-2 w-5/10">
-                                Smart contract address
+                                Smart Contract Address
                             </th>
-                            <th className="p-2 w-2/10">State</th>
+                            <th className="p-2 w-2/10">Status</th>
                             <th className="p-2 w-1/10"></th>
                             <th className="p-2 w-1/10"></th>
                         </tr>
@@ -193,7 +195,7 @@ export default function OngoingContractsListView({
                                     </td>
                                     <td className="p-2 w-1/10 text-center">
                                         <Button
-                                            label="More info"
+                                            label="Details"
                                             onClick={() => {
                                                 handleShowDetails(c);
                                             }}
@@ -202,7 +204,7 @@ export default function OngoingContractsListView({
                                     </td>
                                     <td className="p-2 w-1/10 text-center">
                                         <Button
-                                            label="End transaction"
+                                            label="End"
                                             onClick={() => {
                                                 handleEndTransaction(c);
                                             }}

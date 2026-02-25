@@ -9,6 +9,7 @@ import FormFileInput from "../common/FormFileInput";
 import { isAddress } from "ethers";
 import initWasm, { compute_precontract_values, bytes_to_hex } from "@/app/lib/crypto_lib";
 import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
+import { useToast } from "@/app/lib/ToastContext";
 
 interface NewContractModalProps {
     onClose: () => void;
@@ -43,6 +44,7 @@ export default function NewContractModal({
     const [file, setFile] = useState<FileList | null>();
     const [isComputing, setIsComputing] = useState(false);
     const ethChfRate = useEthChfRate();
+    const { showToast } = useToast();
 
     // Spécifique mode Electron : on veut une seule fenêtre de sélection
     const [isElectron, setIsElectron] = useState(false);
@@ -59,7 +61,7 @@ export default function NewContractModal({
         try {
             const anyWindow: any = typeof window !== "undefined" ? window : {};
             if (!anyWindow.electronAPI || typeof anyWindow.electronAPI.precompute !== "function") {
-                alert("Mode Electron non détecté.");
+                showToast("Electron-Modus nicht erkannt.", "error");
                 return null;
             }
 
@@ -71,15 +73,15 @@ export default function NewContractModal({
             }
             if (preOut.error) {
                 console.error("Erreur precompute natif via Electron:", preOut.error);
-                alert(`Erreur précompute natif: ${preOut.error}`);
+                showToast(`Fehler bei nativem Precompute: ${preOut.error}`, "error");
                 return null;
             }
 
             setPreOutElectron(preOut);
             return preOut;
         } catch (e: any) {
-            console.error("Erreur lors de la sélection du fichier en mode Electron:", e);
-            alert(`Erreur: ${e.message || e.toString()}`);
+            console.error("Fehler bei der Dateiauswahl im Electron-Modus:", e);
+            showToast(`Fehler: ${e.message || e.toString()}`, "error");
             return null;
         }
     };
@@ -88,11 +90,11 @@ export default function NewContractModal({
         try {
             // Valider les adresses (optionnel mais utile)
             if (!buyerPk || !isAddress(buyerPk)) {
-                alert("Adresse buyer invalide");
+                showToast("Käufer-Adresse ungültig", "warning");
                 return;
             }
             if (!vendorPk || !isAddress(vendorPk)) {
-                alert("Adresse vendor invalide");
+                showToast("Verkäufer-Adresse ungültig", "warning");
                 return;
             }
 
@@ -203,9 +205,7 @@ export default function NewContractModal({
                     throw new Error(uploadError);
                 }
 
-                alert(
-                    `Added new contract with ID ${id}. The encryption key is: ${key}`
-                );
+                showToast(`Vertrag ${id} erstellt. Verschlüsselungsschlüssel: ${key}`, "success", 8000);
                 localStorage.setItem(`h_circuit_${id}`, h_circuit);
                 localStorage.setItem(`h_ct_${id}`, h_ct);
                 localStorage.setItem(`key_${id}`, key);
@@ -217,7 +217,7 @@ export default function NewContractModal({
 
             // Web mode: encrypt in the browser using WASM, send only ciphertext to server
             if (!file || file.length === 0) {
-                alert("Veuillez sélectionner un fichier");
+                showToast("Bitte eine Datei auswählen", "warning");
                 return;
             }
 
@@ -314,13 +314,13 @@ export default function NewContractModal({
                 });
             }
 
-            alert(`Added new contract with ID ${id}.`);
+            showToast(`Vertrag ${id} erfolgreich erstellt.`, "success");
             window.dispatchEvent(new Event("reloadData"));
             onClose();
         } catch (e: any) {
             setIsComputing(false);
-            console.error("Erreur lors de la création du contrat:", e);
-            alert(`Erreur: ${e.message || e.toString()}`);
+            console.error("Fehler bei der Vertragserstellung:", e);
+            showToast(`Fehler: ${e.message || e.toString()}`, "error");
         }
     };
 

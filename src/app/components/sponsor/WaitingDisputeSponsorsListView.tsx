@@ -3,8 +3,6 @@
 import Button from "../common/Button";
 import { useEffect, useState } from "react";
 import { sendSbFee, sendSvFee } from "@/app/lib/blockchain/optimistic";
-import FormSelect from "../common/FormSelect";
-import { ALL_PUBLIC_KEYS } from "@/app/lib/blockchain/config";
 import ChfNote from "../common/ChfNote";
 import { useUser } from "@/app/lib/UserContext";
 import { useToast } from "@/app/lib/ToastContext";
@@ -25,12 +23,6 @@ export default function WaitingDisputeSponsorsListView() {
     const { user } = useUser();
     const { showToast } = useToast();
     const [contracts, setContracts] = useState<WaitingContract[]>([]);
-    const [publicKey, setPublicKey] = useState<string>(ALL_PUBLIC_KEYS[0]);
-
-    // Sync with logged-in sponsor on mount
-    useEffect(() => {
-        if (user?.publicKey) setPublicKey(user.publicKey);
-    }, [user?.publicKey]);
     const [isLoading, setIsLoading] = useState(false);
 
     const fetchContracts = () => {
@@ -65,26 +57,31 @@ export default function WaitingDisputeSponsorsListView() {
     }, []);
 
     const handleSendFee = async (contract: WaitingContract) => {
+        const publicKey = user?.publicKey;
+        if (!publicKey) {
+            showToast("Not logged in.", "error");
+            return;
+        }
         try {
             setIsLoading(true);
-            
+
             if (contract.stateName === "WaitSB") {
                 await sendSbFee(publicKey, contract.optimistic_smart_contract);
-                showToast(`Käufer-Sponsor-Gebühr für Vertrag ${contract.id} gesendet!`, "success");
+                showToast(`Buyer sponsor fee for contract ${contract.id} sent!`, "success");
             } else if (contract.stateName === "WaitSV") {
                 const disputeContract = await sendSvFee(
                     publicKey,
                     contract.optimistic_smart_contract
                 );
                 showToast(
-                    `Verkäufer-Sponsor-Gebühr für Vertrag ${contract.id} gesendet!\nDisput-Vertrag deployed: ${disputeContract}`,
+                    `Vendor sponsor fee for contract ${contract.id} sent!\nDispute contract deployed: ${disputeContract}`,
                     "success"
                 );
             }
-            
+
             window.dispatchEvent(new Event("reloadData"));
         } catch (e: any) {
-            showToast(`Fehler: ${e?.message || "Gebühr konnte nicht gesendet werden"}`, "error");
+            showToast(`Error: ${e?.message || "Fee could not be sent"}`, "error");
         } finally {
             setIsLoading(false);
         }
@@ -93,33 +90,22 @@ export default function WaitingDisputeSponsorsListView() {
     return (
         <div className="bg-gray-300 p-4 rounded w-1/2 overflow-auto">
             <h2 className="text-lg font-semibold mb-4">
-                Contracts waiting for dispute sponsor
+                Contracts awaiting dispute sponsor
             </h2>
-            
-            <div className="mb-4">
-                <FormSelect
-                    id="waiting-dispute-public-key"
-                    value={publicKey}
-                    onChange={setPublicKey}
-                    options={ALL_PUBLIC_KEYS}
-                >
-                    Sponsor public key:
-                </FormSelect>
-            </div>
 
             {contracts.length === 0 ? (
                 <p className="text-gray-600 text-center py-4">
-                    No contracts waiting for a dispute sponsor.
+                    No contracts awaiting a dispute sponsor.
                 </p>
             ) : (
                 <table className="w-full table-fixed border-collapse">
                     <thead>
                         <tr className="border-b border-black text-left font-medium">
                             <th className="p-2 w-1/6">ID</th>
-                            <th className="p-2 w-1/6">Contrat</th>
-                            <th className="p-2 w-1/6">State</th>
-                            <th className="p-2 w-1/6">Dispute tip</th>
-                            <th className="p-2 w-1/6">Required sponsor</th>
+                            <th className="p-2 w-1/6">Contract</th>
+                            <th className="p-2 w-1/6">Status</th>
+                            <th className="p-2 w-1/6">Dispute Tip</th>
+                            <th className="p-2 w-1/6">Required Sponsor</th>
                             <th className="p-2 w-1/6">Action</th>
                         </tr>
                     </thead>
@@ -142,8 +128,8 @@ export default function WaitingDisputeSponsorsListView() {
                                         }`}
                                     >
                                         {c.stateName === "WaitSB"
-                                            ? "Waiting buyer sponsor"
-                                            : "Waiting vendor sponsor"}
+                                            ? "Waiting for buyer sponsor"
+                                            : "Waiting for vendor sponsor"}
                                     </span>
                                 </td>
                                 <td className="p-2 w-1/6">{c.tip_dispute} ETH<ChfNote value={c.tip_dispute} /></td>
@@ -160,8 +146,8 @@ export default function WaitingDisputeSponsorsListView() {
                                     <Button
                                         label={
                                             c.stateName === "WaitSB"
-                                                ? "Sponsor Buyer"
-                                                : "Sponsor Vendor"
+                                                ? "Sponsor buyer"
+                                                : "Sponsor vendor"
                                         }
                                         onClick={() => handleSendFee(c)}
                                         width="full"
@@ -176,13 +162,3 @@ export default function WaitingDisputeSponsorsListView() {
         </div>
     );
 }
-
-
-
-
-
-
-
-
-
-
