@@ -1,0 +1,156 @@
+⏺ Hier ist die vollständige Protokollstruktur des SOX Marketplace:
+
+  ---
+  Protokoll-Übersicht
+
+  Kernprinzip: Der Marketplace ist ein untrusted Vermittler — er sieht nur verschlüsselte Daten und Hashes. Die eigentliche
+  Verifikation passiert on-chain.
+
+  ---
+  Akteure & Vertrauen
+
+  Vendor ←────────────────────────────────────→ Buyer
+           (kein direkter Kanal nötig)
+               ↓                    ↓
+           Marketplace           Blockchain
+          (untrusted)           (trustworthy)
+
+  ┌─────────────┬───────────┬────────────────────────────────────────┐
+  │   Akteur    │ Vertraut? │                 Rolle                  │
+  ├─────────────┼───────────┼────────────────────────────────────────┤
+  │ Marketplace │ ❌ Nein   │ Datenlagerung (encrypted), Vermittlung │
+  ├─────────────┼───────────┼────────────────────────────────────────┤
+  │ Blockchain  │ ✅ Ja     │ Schlüssel, Commitment, Funds, Dispute  │
+  ├─────────────┼───────────┼────────────────────────────────────────┤
+  │ Vendor      │ Teilweise │ Verschlüsselt, committet               │
+  ├─────────────┼───────────┼────────────────────────────────────────┤
+  │ Buyer       │ Teilweise │ Zahlt, verifiziert                     │
+  ├─────────────┼───────────┼────────────────────────────────────────┤
+  │ Sponsor     │ Teilweise │ Gas-Zahler, Dispute-Schiedsrichter     │
+  └─────────────┴───────────┴────────────────────────────────────────┘
+
+  ---
+  Was wo gespeichert wird
+
+  Blockchain (on-chain, öffentlich)
+
+  OptimisticSOXAccount contract:
+    - commitment:        keccak256(ct ‖ circuit_eval ‖ opening_value)
+    - key:               16-byte AES-Schlüssel (nach Vendor-Submit)
+    - buyer/vendor/sponsor Adressen
+    - agreedPrice, tips
+    - State Machine: WaitPayment → WaitKey → WaitSB → WaitSV → End
+
+  Marketplace/Server (off-chain, untrusted)
+
+  DB (SQLite):
+    - commitment, opening_value (Vendor kennt das, Buyer kann später verifizieren)
+    - num_blocks, num_gates (Circuit-Parameter)
+    - contract metadata
+
+  Disk:
+    - file_{id}.enc → verschlüsselte Datei (Ciphertext)
+
+  Nur beim Vendor (lokal/localStorage)
+
+    - Plaintext (niemals hochgeladen)
+    - AES-128-CTR Key (nur Vendor kennt ihn vor Contract-Deploy)
+    - session_key_private (für Smart Contract Interaktion)
+
+  ---
+  Vollständiger Protokollablauf
+
+  Phase 1: Listing & Angebot
+
+  Vendor                   Marketplace               Buyer
+    |                          |                       |
+    |──POST /api/listings ────>|                       |
+    |   {title, price, ...}    |                       |
+    |                          |──zeige Listing ──────>|
+    |                          |<──POST purchase_request|
+    |<──zeige Anfrage ─────────|                       |
+
+  Phase 2: Precontract (Commitment-Erzeugung)
+
+  Vendor (Browser/WASM)
+    |
+    |── encrypt(file, random_key) via AES-128-CTR ──────> ct (Ciphertext)
+    |── compile_circuit(ct) ─────────────────────────────> circuit
+    |── evaluate_circuit(circuit, ct) ──────────────────> gate values
+    |── commit(ct ‖ circuit_eval ‖ random_salt) ─────────> (c, o)
+    |
+    |──PUT /api/precontracts {ct, commitment=c, opening=o, ...}──> Marketplace
+    |   Marketplace speichert: ct (encrypted), commitment, opening_value
+    |   Marketplace weiß NICHT: key, plaintext
+
+  Commitment-Formel:
+  opening_value  = SHA256(plaintext) ‖ random_salt_16_bytes
+  commitment (c) = keccak256(ciphertext ‖ circuit_evaluation ‖ opening_value)
+
+  Phase 3: Smart Contract Deploy (Optimistic)
+
+  Vendor/Sponsor
+    |── deploy OptimisticSOXAccount {commitment, price, buyer, vendor, sponsor}
+    |   → Blockchain speichert commitment on-chain
+    |── State: WaitPayment
+
+  Phase 4: Key-Übergabe (on-chain!)
+
+  Buyer                    Blockchain               Vendor
+    |                          |                       |
+    |── deposit ETH ──────────>|                       |
+    |   State: WaitKey         |                       |
+    |                          |<── submitKey(key) ────|
+    |                          |   key on-chain!       |
+    |── lese key ─────────────>|                       |
+    |                          |                       |
+  Wichtig: Key geht NICHT durch Marketplace — direkt Vendor → Blockchain → Buyer
+
+  Phase 5: Commitment-Verifikation (Buyer, browser-side)
+
+  Buyer (Browser/WASM)
+    |── GET /api/files/{id}  → ct (encrypted file vom Marketplace)
+    |── lese commitment vom Smart Contract (on-chain)
+    |── check_precontract(ct, commitment, opening_value, key)
+    |       → WASM verifiziert lokal
+    |── decrypt(ct, key) → plaintext
+
+  Falls Verifikation fehlschlägt → Dispute!
+
+  Phase 6: Dispute (Binary Search on-chain)
+
+  Buyer ──────────────────────────────── DisputeSOXAccount
+    |── challenge(gate_index i)           |
+    |                                     |
+  Vendor ──────────────────────────────── |
+    |── hpre(evaluated_circuit, i)        | ← Akkumulator-Wert
+    |                                     |
+    |   [AccumulatorVerifier on-chain]    |
+    |   match? → suche rechts             |
+    |   mismatch? → suche links           |
+    |   O(log N) Runden                   |
+    |                                     |
+    |── final: gate_i Evaluation          |
+    |   EvaluatorSOX_V2.evaluateGate()    | ← on-chain!
+    |   Ergebnis determiniert Gewinner    |
+
+  ---
+  Warum der Marketplace nicht trusted sein muss
+
+  1. Commitment on-chain: Vendor kann ct nach Commitment nicht mehr ändern
+  2. Key on-chain: Marketplace sieht den Key erst wenn er on-chain ist (zu spät zu manipulieren)
+  3. Verifikation im Browser: Buyer verifiziert commitment lokal (WASM), nicht durch Marketplace
+  4. Dispute on-chain: Bei Streit entscheidet die Blockchain durch circuit evaluation — kein Marketplace-Einfluss
+  5. Funds on-chain: ETH im Smart Contract, nicht beim Marketplace
+
+  Der Marketplace speichert nur: verschlüsselte Datei + öffentliche Metadaten — beides nützt ihm ohne Key nichts.
+
+  ---
+  Crypto-Stack
+
+  Encryption:    AES-128-CTR (16-byte key, 16-byte IV)
+  Commitment:    keccak256 (Ethereum-nativ, on-chain verifizierbar)
+  Hash (file):   SHA256 (description field)
+  Circuit:       Gate-basiert, SHA256/AES evaluierbar on-chain
+  Accumulator:   Keccak256-Baum über gate values (Merkle-ähnlich)
+  Keys:          16 bytes random, einmalig pro Contract

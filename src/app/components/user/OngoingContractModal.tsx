@@ -297,8 +297,11 @@ export default function OngoingContractModal({
                 if (publicKey == pk_buyer)
                     return (
                         <div className="flex flex-col gap-2 w-full">
+                            <div className="text-sm text-gray-600">
+                                Item price: <strong>{Number(price)} ETH</strong> + completion tip: <strong>{Number(tip_completion)} ETH</strong>
+                            </div>
                             <Button
-                                label={`Pay ${formatWei(paymentAmount)} ETH`}
+                                label={`Pay ${paymentAmount} ETH`}
                                 onClick={clickSendPayment}
                                 isDisabled={paymentBusy}
                             />
@@ -1334,6 +1337,10 @@ export default function OngoingContractModal({
                         <div>
                             <strong>Item description: </strong>{" "}
                             {item_description}
+                        </div>
+                        <div>
+                            <strong>Item price:</strong> {Number(price)} ETH
+                            <ChfNote value={String(price)} />
                         </div>
                         <div>
                             <strong>Completion tip:</strong> {formatWei(completionTip)} ETH

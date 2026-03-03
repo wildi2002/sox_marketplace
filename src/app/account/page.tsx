@@ -13,19 +13,31 @@ type TxEvent = {
     amount: number;
     status: string;
     gas_wei: string | null;
+    saldo: number; // exact on-chain balance after this transaction, pre-computed server-side
 };
 
 const typeColors: Record<string, string> = {
-    Purchase:   "bg-red-100 text-red-700",
-    Sale:       "bg-green-100 text-green-700",
-    Sponsoring: "bg-purple-100 text-purple-700",
+    Purchase:       "bg-red-100 text-red-700",
+    Sale:           "bg-green-100 text-green-700",
+    Insurance:      "bg-orange-100 text-orange-700",
+    Return:         "bg-green-100 text-green-700",
+    Tip:            "bg-emerald-100 text-emerald-700",
+    Refund:         "bg-blue-100 text-blue-700",
+    "Dispute SB":   "bg-purple-100 text-purple-700",
+    "Dispute SV":   "bg-violet-100 text-violet-700",
+    "Dispute Tip":  "bg-emerald-100 text-emerald-700",
+    "EP Return":    "bg-sky-100 text-sky-700",
+    Gas:            "bg-gray-100 text-gray-500",
+    Transfer:       "bg-gray-100 text-gray-600",
+    Received:       "bg-teal-100 text-teal-700",
 };
 
 const statusColors: Record<string, string> = {
-    Active:    "text-blue-600",
-    Pending:   "text-gray-400",
-    Fulfilled: "text-green-600",
-    Rejected:  "text-red-500",
+    Active:       "text-blue-600",
+    Pending:      "text-gray-400",
+    Fulfilled:    "text-green-600",
+    Rejected:     "text-red-500",
+    "In Dispute": "text-orange-500",
 };
 
 function formatEth(value: number): string {
@@ -81,25 +93,12 @@ export default function AccountPage() {
         if (user?.username) setUsernameInput(user.username);
     }, [user?.username]);
 
-    /**
-     * Compute saldo anchored to current on-chain balance (newest tx = current balance).
-     * Going backwards: undo each tx's amount AND its gas cost.
-     *   balance_before = balance_after - amount + gas_in_eth
-     */
-    const txWithSaldo = useMemo(() => {
-        const balanceNum = rawBalance ? parseFloat(rawBalance) : null;
-        if (balanceNum === null || isNaN(balanceNum)) {
-            return transactions.map(tx => ({ ...tx, saldo: null as number | null }));
-        }
-        let running = balanceNum;
-        return transactions.map((tx) => {
-            const saldo = running;
-            const gasEth = tx.gas_wei ? Number(tx.gas_wei) / 1e18 : 0;
-            running -= tx.amount;   // undo protocol amount (signed)
-            running += gasEth;      // undo gas deduction (always an outflow)
-            return { ...tx, saldo };
-        });
-    }, [rawBalance, transactions]);
+    // Saldo is pre-computed server-side (exact eth_getBalance at each block).
+    // No client-side back-calculation needed.
+    const txWithSaldo = useMemo(
+        () => transactions.map(tx => ({ ...tx, saldo: tx.saldo ?? null as number | null })),
+        [transactions]
+    );
 
     if (!user) return null;
 
