@@ -14,7 +14,9 @@ interface NonAcceptedPrecontractModalProps {
     contract?: Contract;
 }
 
-type VerifyResult = { success: true; h_circuit: string; h_ct: string } | { success: false; error: string };
+type VerifyResult =
+    | { success: true; h_circuit: string; h_ct: string; zkValid?: boolean; zkReason?: string }
+    | { success: false; error: string };
 
 export default function NonAcceptedPrecontractModal({
     onClose,
@@ -39,6 +41,12 @@ export default function NonAcceptedPrecontractModal({
         algorithm_suite,
         commitment,
         opening_value,
+        listing_type,
+        preview_image,
+        preview_hash,
+        brisque_value,
+        zk_proof,
+        zk_c_k,
     } = contract;
 
     const handleVerifyCommitment = async () => {
@@ -68,7 +76,26 @@ export default function NonAcceptedPrecontractModal({
                 localStorage.setItem(`h_circuit_${id}`, h_circuit_hex);
                 localStorage.setItem(`h_ct_${id}`, h_ct_hex);
 
-                setVerifyResult({ success: true, h_circuit: h_circuit_hex, h_ct: h_ct_hex });
+                // For image listings: also verify the ZK proof (preview_hash + brisque binding)
+                let zkValid: boolean | undefined;
+                let zkReason: string | undefined;
+                if (listing_type === "image" && zk_proof && zk_c_k && preview_hash && brisque_value != null) {
+                    const zkRes = await fetch("/api/zk/verify", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            proof: zk_proof,
+                            c_k: zk_c_k,
+                            preview_hash,
+                            brisque: brisque_value,
+                        }),
+                    });
+                    const zkData = await zkRes.json();
+                    zkValid = zkData.valid;
+                    zkReason = zkData.reason;
+                }
+
+                setVerifyResult({ success: true, h_circuit: h_circuit_hex, h_ct: h_ct_hex, zkValid, zkReason });
             } else {
                 setVerifyResult({ success: false, error: "Commitment does not match the received ciphertext." });
             }
@@ -126,6 +153,34 @@ export default function NonAcceptedPrecontractModal({
     return (
         <Modal title="Precontract Details" onClose={onClose}>
             <div className="grid grid-cols-2 gap-4">
+                {listing_type === "image" && preview_image && (
+                    <div className="col-span-2 flex items-start gap-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                        <img
+                            src={preview_image}
+                            alt="Listing preview"
+                            className="max-h-32 max-w-[150px] object-contain rounded border border-gray-200"
+                        />
+                        <div className="text-sm space-y-1">
+                            <p className="font-semibold text-blue-800">Image Listing Preview</p>
+                            <p className="text-gray-600 text-xs">
+                                This is what the vendor advertised. After accepting, verify the decrypted file matches this preview.
+                            </p>
+                            {brisque_value != null && (
+                                <span className={`inline-block text-xs px-2 py-0.5 rounded font-medium ${
+                                    brisque_value < 30 ? "bg-green-100 text-green-800" :
+                                    brisque_value < 60 ? "bg-yellow-100 text-yellow-800" :
+                                    "bg-red-100 text-red-800"
+                                }`}>
+                                    BRISQUE {brisque_value.toFixed(1)} · {brisque_value < 30 ? "Good" : brisque_value < 60 ? "Avg" : "Low"} quality
+                                </span>
+                            )}
+                            {!zk_proof && (
+                                <p className="text-xs text-gray-400">No ZK proof attached to this listing.</p>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 <div><strong>Contract ID:</strong> {id}</div>
                 <div>
                     <strong>Price:</strong> {price} ETH
@@ -182,6 +237,21 @@ export default function NonAcceptedPrecontractModal({
                                     <p className="text-xs mt-1 text-green-700">
                                         Accumulators saved to localStorage.
                                     </p>
+                                    {listing_type === "image" && verifyResult.zkValid === true && (
+                                        <p className="text-xs mt-1 font-medium text-green-700">
+                                            ✓ ZK proof valid — preview hash and BRISQUE score are correctly bound.
+                                        </p>
+                                    )}
+                                    {listing_type === "image" && verifyResult.zkValid === false && (
+                                        <p className="text-xs mt-1 font-medium text-red-700">
+                                            ✗ ZK proof invalid: {verifyResult.zkReason}. Do not accept.
+                                        </p>
+                                    )}
+                                    {listing_type === "image" && verifyResult.zkValid === undefined && (
+                                        <p className="text-xs mt-1 text-gray-500">
+                                            No ZK proof to verify for this contract.
+                                        </p>
+                                    )}
                                 </>
                             ) : (
                                 <>

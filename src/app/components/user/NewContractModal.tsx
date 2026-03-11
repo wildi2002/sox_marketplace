@@ -54,6 +54,7 @@ export default function NewContractModal({
     const [timeoutDelay, setTimeoutDelay] = useState(prefillTimeoutDelay ?? "");
     const [algorithms, setAlgorithms] = useState("default");
     const [file, setFile] = useState<FileList | null>();
+    const [imageHashStatus, setImageHashStatus] = useState<"idle" | "checking" | "match" | "mismatch">("idle");
     const [isComputing, setIsComputing] = useState(false);
     const ethChfRate = useEthChfRate();
     const { showToast } = useToast();
@@ -95,6 +96,38 @@ export default function NewContractModal({
             console.error("Fehler bei der Dateiauswahl im Electron-Modus:", e);
             showToast(`Fehler: ${e.message || e.toString()}`, "error");
             return null;
+        }
+    };
+
+    const handleFileChange = async (files: FileList | null) => {
+        setFile(files);
+        setImageHashStatus("idle");
+
+        if (listingType !== "image" || !listingPreviewHash || !files || files.length === 0) return;
+
+        setImageHashStatus("checking");
+        try {
+            const f = files[0];
+            const bitmap = await createImageBitmap(f);
+            const maxDim = 400;
+            let { width, height } = bitmap;
+            if (width > maxDim || height > maxDim) {
+                const ratio = Math.min(maxDim / width, maxDim / height);
+                width = Math.round(width * ratio);
+                height = Math.round(height * ratio);
+            }
+            const canvas = new OffscreenCanvas(width, height);
+            const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close();
+            const rgbaBytes = ctx.getImageData(0, 0, width, height).data;
+            const hashBuffer = await crypto.subtle.digest("SHA-256", rgbaBytes);
+            const hash = Array.from(new Uint8Array(hashBuffer))
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("");
+            setImageHashStatus(hash === listingPreviewHash ? "match" : "mismatch");
+        } catch {
+            setImageHashStatus("idle");
         }
     };
 
@@ -235,7 +268,11 @@ export default function NewContractModal({
 
             // Web mode: encrypt in the browser using WASM, send only ciphertext to server
             if (!file || file.length === 0) {
-                showToast("Bitte eine Datei auswählen", "warning");
+                showToast("Please select a file", "warning");
+                return;
+            }
+            if (listingType === "image" && imageHashStatus === "mismatch") {
+                showToast("The selected image does not match the listing preview. Upload the correct image.", "error");
                 return;
             }
 
@@ -439,9 +476,26 @@ export default function NewContractModal({
                 </FormSelect>
 
                 {!isElectron && (
-                    <FormFileInput id="sold-file" onChange={setFile}>
-                        File
-                    </FormFileInput>
+                    <div className="col-span-2">
+                        <FormFileInput
+                            id="sold-file"
+                            onChange={handleFileChange}
+                            accept={listingType === "image" ? "image/*" : undefined}
+                        >
+                            {listingType === "image" ? "Image file (must match listing preview)" : "File"}
+                        </FormFileInput>
+                        {listingType === "image" && imageHashStatus === "checking" && (
+                            <p className="text-xs text-blue-600 mt-1">Verifying image matches listing preview…</p>
+                        )}
+                        {listingType === "image" && imageHashStatus === "match" && (
+                            <p className="text-xs text-green-600 mt-1">✓ Image matches listing preview</p>
+                        )}
+                        {listingType === "image" && imageHashStatus === "mismatch" && (
+                            <p className="text-xs text-red-600 mt-1 font-medium">
+                                ✗ This image does not match the listing preview. You must upload the exact same image that was used to create the listing.
+                            </p>
+                        )}
+                    </div>
                 )}
 
                 {isElectron && (

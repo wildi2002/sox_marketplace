@@ -22,6 +22,13 @@ export type Contract = {
     sponsor: string;
     opening_value: string;
     optimistic_smart_contract?: string;
+    // Image listing metadata
+    listing_type?: string | null;
+    preview_image?: string | null;
+    preview_hash?: string | null;
+    brisque_value?: number | null;
+    zk_proof?: string | null;
+    zk_c_k?: string | null;
 };
 
 interface NonAcceptedPrecontractsListViewProps {

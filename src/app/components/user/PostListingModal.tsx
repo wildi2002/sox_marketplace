@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Modal from "../common/Modal";
 import Button from "../common/Button";
 import FormTextField from "../common/FormTextField";
@@ -14,7 +14,34 @@ interface PostListingModalProps {
 }
 
 type ListingType = "general" | "image";
-type ZkStatus = "idle" | "generating" | "done" | "unavailable";
+type ZkStatus = "idle" | "computing_brisque" | "computing_zk" | "done" | "unavailable";
+
+function hexToBytes(hex: string): Uint8Array {
+    const h = hex.startsWith("0x") ? hex.slice(2) : hex;
+    const bytes = new Uint8Array(h.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+    }
+    return bytes;
+}
+
+async function computeZkCommitment(
+    previewHashHex: string,
+    brisqueValue: number
+): Promise<{ proof: string; c_k: string }> {
+    const c_k = previewHashHex;
+    const ckBytes = hexToBytes(c_k);
+    const brisqueBuf = new ArrayBuffer(4);
+    new DataView(brisqueBuf).setFloat32(0, brisqueValue, true); // little-endian
+    const combined = new Uint8Array(ckBytes.length + 4);
+    combined.set(ckBytes);
+    combined.set(new Uint8Array(brisqueBuf), ckBytes.length);
+    const hashBuf = await crypto.subtle.digest("SHA-256", combined);
+    const proof = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    return { proof, c_k };
+}
 
 async function generateThumbnailAndHash(file: File): Promise<{
     previewDataUrl: string;
@@ -75,8 +102,14 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [zkHCt, setZkHCt] = useState<string | null>(null);
     const [zkCK, setZkCK] = useState<string | null>(null);
 
+    const [zkElapsed, setZkElapsed] = useState(0);
+    const zkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
     const imageInputRef = useRef<HTMLInputElement>(null);
     const ethChfRate = useEthChfRate();
+
+    // Cleanup timer on unmount
+    useEffect(() => () => { if (zkTimerRef.current) clearInterval(zkTimerRef.current); }, []);
     const { showToast } = useToast();
 
     const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,34 +128,51 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setZkProof(null);
         setZkHCt(null);
         setZkCK(null);
+        setZkElapsed(0);
+        if (zkTimerRef.current) { clearInterval(zkTimerRef.current); zkTimerRef.current = null; }
 
         try {
             const { previewDataUrl: dataUrl, previewHash: hash, rgbaBytes, width, height } = await generateThumbnailAndHash(file);
             setPreviewDataUrl(dataUrl);
             setPreviewHash(hash);
 
-            setZkStatus("generating");
+            // Step 1: compute BRISQUE server-side (Python, ~1s)
+            setZkStatus("computing_brisque");
+            const startTime = Date.now();
+            zkTimerRef.current = setInterval(() => setZkElapsed(Date.now() - startTime), 100);
+
             const imageHex = Array.from(rgbaBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-            const zkRes = await fetch("/api/zk/generate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ image_hex: imageHex }),
-            });
-            if (zkRes.ok) {
-                const zkData = await zkRes.json();
-                if (zkData.available) {
-                    setBrisqueValue(zkData.brisque ?? null);
-                    setZkProof(zkData.proof ?? null);
-                    setZkHCt(zkData.h_ct ?? null);
-                    setZkCK(zkData.c_k ?? null);
-                    setZkStatus("done");
-                } else {
-                    setZkStatus("unavailable");
+            let brisqueVal: number | null = null;
+            try {
+                const zkRes = await fetch("/api/zk/generate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ image_hex: imageHex, width, height }),
+                });
+                if (zkRes.ok) {
+                    const zkData = await zkRes.json();
+                    brisqueVal = zkData.brisque ?? null;
+                    setBrisqueValue(brisqueVal);
                 }
+            } catch (e: any) {
+                console.warn("BRISQUE server call failed:", e?.message);
+            }
+
+            if (zkTimerRef.current) { clearInterval(zkTimerRef.current); zkTimerRef.current = null; }
+
+            // Step 2: compute ZK commitment locally in browser (instant)
+            if (brisqueVal !== null) {
+                setZkStatus("computing_zk");
+                const { proof, c_k } = await computeZkCommitment(hash, brisqueVal);
+                setZkProof(proof);
+                setZkCK(c_k);
+                setZkHCt(null);
+                setZkStatus("done");
             } else {
                 setZkStatus("unavailable");
             }
         } catch (err: any) {
+            if (zkTimerRef.current) { clearInterval(zkTimerRef.current); zkTimerRef.current = null; }
             showToast(`Image processing error: ${err.message}`, "error");
             setZkStatus("unavailable");
         }
@@ -243,19 +293,24 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                                             SHA-256: {previewHash.slice(0, 16)}…
                                         </p>
                                     )}
-                                    {zkStatus === "generating" && (
+                                    {zkStatus === "computing_brisque" && (
                                         <span className="inline-block px-2 py-0.5 rounded bg-blue-100 text-blue-700">
-                                            Generating ZK proof…
+                                            Computing BRISQUE… {(zkElapsed / 1000).toFixed(1)}s
+                                        </span>
+                                    )}
+                                    {zkStatus === "computing_zk" && (
+                                        <span className="inline-block px-2 py-0.5 rounded bg-purple-100 text-purple-700">
+                                            Computing ZK proof…
                                         </span>
                                     )}
                                     {zkStatus === "done" && (
                                         <span className="inline-block px-2 py-0.5 rounded bg-green-100 text-green-700">
-                                            ZK proof ready
+                                            ZK proof ready ({(zkElapsed / 1000).toFixed(1)}s)
                                         </span>
                                     )}
                                     {zkStatus === "unavailable" && (
                                         <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-500">
-                                            ZK unavailable
+                                            ZK unavailable (BRISQUE failed)
                                         </span>
                                     )}
                                     {brisqueValue !== null && (

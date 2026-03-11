@@ -5,6 +5,7 @@ interface FormFileInputProps {
     children: string;
     onChange?: (newValue: FileList | null) => void;
     hidden?: boolean;
+    accept?: string;
 }
 
 export default function FormFileInput({
@@ -12,6 +13,7 @@ export default function FormFileInput({
     children: label,
     onChange = () => {},
     hidden,
+    accept,
 }: FormFileInputProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -25,6 +27,7 @@ export default function FormFileInput({
                 name={id}
                 id={id}
                 type="file"
+                accept={accept}
                 onChange={(e) => onChange(e.target.files)}
                 className={`w-full border border-gray-300 p-2 rounded ${
                     hidden ? "hidden" : ""
