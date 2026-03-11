@@ -147,4 +147,104 @@ try {
     }
 }
 
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN listing_type TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding listing_type:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN preview_image TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding preview_image:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN preview_hash TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding preview_hash:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN brisque_value REAL");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding brisque_value:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN zk_proof TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_proof to listings:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN zk_h_ct TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_h_ct to listings:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN zk_c_k TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_c_k to listings:", e.message);
+    }
+}
+
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN listing_type TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding listing_type to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN preview_image TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding preview_image to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN preview_hash TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding preview_hash to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN brisque_value REAL");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding brisque_value to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_proof TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_proof to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_h_ct TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_h_ct to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_c_k TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_c_k to contracts:", e.message);
+    }
+}
+
 export default db;

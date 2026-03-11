@@ -255,7 +255,13 @@ export async function PUT(req: Request) {
                 algorithm_suite: data.algorithm_suite || "AES-128-CTR",
                 file: preOut.file || preOut.ciphertext || "",
                 file_path: filePath || "",
-                file_name: preOut.file_name || ""
+                file_name: preOut.file_name || "",
+                listing_type: data.listing_type || null,
+                preview_hash: data.preview_hash || null,
+                brisque_value: data.brisque_value ?? null,
+                zk_proof: data.zk_proof || null,
+                zk_h_ct: data.zk_h_ct || null,
+                zk_c_k: data.zk_c_k || null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -272,13 +278,17 @@ export async function PUT(req: Request) {
                 pk_buyer, pk_vendor, price, num_blocks,
                 num_gates, commitment, tip_completion, tip_dispute,
                 protocol_version, timeout_delay, algorithm_suite,
-                accepted, file_name
+                accepted, file_name,
+                listing_type, preview_hash, brisque_value,
+                zk_proof, zk_h_ct, zk_c_k
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?,
-                0, ?
+                0, ?,
+                ?, ?, ?,
+                ?, ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -294,7 +304,13 @@ export async function PUT(req: Request) {
                 contractData.protocol_version,
                 contractData.timeout_delay,
                 contractData.algorithm_suite,
-                contractData.file_name
+                contractData.file_name,
+                contractData.listing_type,
+                contractData.preview_hash,
+                contractData.brisque_value,
+                contractData.zk_proof,
+                contractData.zk_h_ct,
+                contractData.zk_c_k
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);

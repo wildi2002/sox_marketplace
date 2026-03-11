@@ -21,15 +21,19 @@ export async function GET() {
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor } = body;
+        const {
+            title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
+            listing_type, preview_image, preview_hash, brisque_value, zk_proof, zk_h_ct, zk_c_k,
+        } = body;
 
         if (!title || !price || !pk_vendor) {
             return NextResponse.json({ error: "Missing required fields: title, price, pk_vendor" }, { status: 400 });
         }
 
         const result = db.prepare(`
-            INSERT INTO listings (title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO listings (title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
+                listing_type, preview_image, preview_hash, brisque_value, zk_proof, zk_h_ct, zk_c_k)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             title,
             description || "",
@@ -38,7 +42,14 @@ export async function POST(req: NextRequest) {
             tip_dispute ?? 0,
             timeout_delay ?? 3600,
             algorithm_suite ?? "default",
-            pk_vendor
+            pk_vendor,
+            listing_type ?? "general",
+            preview_image ?? null,
+            preview_hash ?? null,
+            brisque_value ?? null,
+            zk_proof ?? null,
+            zk_h_ct ?? null,
+            zk_c_k ?? null,
         );
 
         return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 });

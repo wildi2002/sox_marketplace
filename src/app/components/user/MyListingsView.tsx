@@ -16,6 +16,12 @@ type Listing = {
     algorithm_suite: string;
     pk_vendor: string;
     pending_requests: number;
+    listing_type?: string;
+    preview_hash?: string | null;
+    brisque_value?: number | null;
+    zk_proof?: string | null;
+    zk_h_ct?: string | null;
+    zk_c_k?: string | null;
 };
 
 type PurchaseRequest = {
@@ -208,6 +214,12 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                     prefillTipCompletion={fulfillTarget.listing.tip_completion.toString()}
                     prefillTipDispute={fulfillTarget.listing.tip_dispute.toString()}
                     prefillTimeoutDelay={fulfillTarget.listing.timeout_delay.toString()}
+                    listingType={fulfillTarget.listing.listing_type}
+                    listingPreviewHash={fulfillTarget.listing.preview_hash}
+                    listingBrisqueValue={fulfillTarget.listing.brisque_value}
+                    listingZkProof={fulfillTarget.listing.zk_proof}
+                    listingZkHCt={fulfillTarget.listing.zk_h_ct}
+                    listingZkCK={fulfillTarget.listing.zk_c_k}
                     onClose={() => {
                         setFulfillTarget(null);
                         if (expandedId !== null) fetchRequests(expandedId);

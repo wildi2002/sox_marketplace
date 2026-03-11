@@ -21,6 +21,12 @@ interface NewContractModalProps {
     prefillTipCompletion?: string;
     prefillTipDispute?: string;
     prefillTimeoutDelay?: string;
+    listingType?: string;
+    listingPreviewHash?: string | null;
+    listingBrisqueValue?: number | null;
+    listingZkProof?: string | null;
+    listingZkHCt?: string | null;
+    listingZkCK?: string | null;
 }
 
 export default function NewContractModal({
@@ -33,6 +39,12 @@ export default function NewContractModal({
     prefillTipCompletion,
     prefillTipDispute,
     prefillTimeoutDelay,
+    listingType,
+    listingPreviewHash,
+    listingBrisqueValue,
+    listingZkProof,
+    listingZkHCt,
+    listingZkCK,
 }: NewContractModalProps) {
     const [buyerPk, setBuyerPk] = useState(prefillBuyerPk ?? "");
     const [price, setPrice] = useState(prefillPrice ?? "");
@@ -127,6 +139,12 @@ export default function NewContractModal({
                         protocol_version: version,
                         timeout_delay: timeoutDelay,
                         algorithm_suite: algorithms,
+                        listing_type: listingType ?? null,
+                        preview_hash: listingPreviewHash ?? null,
+                        brisque_value: listingBrisqueValue ?? null,
+                        zk_proof: listingZkProof ?? null,
+                        zk_h_ct: listingZkHCt ?? null,
+                        zk_c_k: listingZkCK ?? null,
                     }),
                 });
 
@@ -253,6 +271,12 @@ export default function NewContractModal({
                     protocol_version: version,
                     timeout_delay: timeoutDelay,
                     algorithm_suite: algorithms,
+                    listing_type: listingType ?? null,
+                    preview_hash: listingPreviewHash ?? null,
+                    brisque_value: listingBrisqueValue ?? null,
+                    zk_proof: listingZkProof ?? null,
+                    zk_h_ct: listingZkHCt ?? null,
+                    zk_c_k: listingZkCK ?? null,
                 }),
             });
 

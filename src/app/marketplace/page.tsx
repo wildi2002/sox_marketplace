@@ -17,7 +17,30 @@ type Listing = {
     pk_vendor: string;
     pending_requests: number;
     created_at: string;
+    listing_type?: string;
+    preview_image?: string;
+    brisque_value?: number | null;
+    zk_proof?: string | null;
+    zk_h_ct?: string | null;
+    zk_c_k?: string | null;
+    preview_hash?: string | null;
 };
+
+function BrisqueBadge({ value }: { value: number | null | undefined }) {
+    if (value === null || value === undefined) return null;
+    const color =
+        value < 30
+            ? "bg-green-100 text-green-800"
+            : value < 60
+            ? "bg-yellow-100 text-yellow-800"
+            : "bg-red-100 text-red-800";
+    const label = value < 30 ? "Good quality" : value < 60 ? "Avg quality" : "Low quality";
+    return (
+        <span className={`text-xs px-2 py-0.5 rounded font-medium ${color}`}>
+            BRISQUE {value.toFixed(1)} · {label}
+        </span>
+    );
+}
 
 export default function MarketplacePage() {
     const router = useRouter();
@@ -26,6 +49,7 @@ export default function MarketplacePage() {
     const [listings, setListings] = useState<Listing[]>([]);
     const [requesting, setRequesting] = useState<number | null>(null);
     const [search, setSearch] = useState("");
+    const [verifying, setVerifying] = useState<number | null>(null);
 
     const fetchListings = async () => {
         const res = await fetch("/api/listings");
@@ -65,6 +89,34 @@ export default function MarketplacePage() {
         }
     };
 
+    const handleVerifyZk = async (listing: Listing) => {
+        if (!listing.zk_proof) return;
+        setVerifying(listing.id);
+        try {
+            const res = await fetch("/api/zk/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    proof: listing.zk_proof,
+                    h_ct: listing.zk_h_ct,
+                    preview_hash: listing.preview_hash,
+                    brisque: listing.brisque_value ?? null,
+                    c_k: listing.zk_c_k,
+                }),
+            });
+            const data = await res.json();
+            if (data.valid) {
+                showToast("ZK proof verified successfully.", "success");
+            } else {
+                showToast(`ZK proof invalid: ${data.reason || "unknown reason"}`, "error");
+            }
+        } catch (e: any) {
+            showToast(`ZK verification error: ${e.message}`, "error");
+        } finally {
+            setVerifying(null);
+        }
+    };
+
     const filtered = listings.filter(
         (l) =>
             l.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -76,7 +128,6 @@ export default function MarketplacePage() {
 
     return (
         <main className="p-4 min-h-screen">
-            {/* Search + stats */}
             <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
                 <h1 className="text-2xl font-bold">Marketplace</h1>
                 <div className="flex items-center gap-3 flex-wrap">
@@ -94,7 +145,6 @@ export default function MarketplacePage() {
                 </div>
             </div>
 
-            {/* Listings grid */}
             {filtered.length === 0 ? (
                 <div className="text-center py-24 text-gray-400">
                     <p className="text-xl mb-2">No listings found.</p>
@@ -111,8 +161,41 @@ export default function MarketplacePage() {
                             key={listing.id}
                             className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm flex flex-col hover:shadow-md transition-shadow"
                         >
+                            {listing.listing_type === "image" && listing.preview_image && (
+                                <div className="mb-3 flex justify-center">
+                                    <img
+                                        src={listing.preview_image}
+                                        alt={listing.title}
+                                        className="max-h-40 max-w-full object-contain rounded border border-gray-100"
+                                    />
+                                </div>
+                            )}
+
                             <div className="flex-1">
-                                <h2 className="text-lg font-semibold mb-1">{listing.title}</h2>
+                                <div className="flex items-start justify-between gap-2 mb-1">
+                                    <h2 className="text-lg font-semibold">{listing.title}</h2>
+                                    <div className="flex gap-1 shrink-0">
+                                        {listing.listing_type === "image" && (
+                                            <>
+                                                <BrisqueBadge value={listing.brisque_value} />
+                                                {listing.zk_proof ? (
+                                                    <button
+                                                        onClick={() => handleVerifyZk(listing)}
+                                                        disabled={verifying === listing.id}
+                                                        className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-medium hover:bg-blue-200 transition-colors disabled:opacity-50"
+                                                        title="Click to verify ZK proof"
+                                                    >
+                                                        {verifying === listing.id ? "Verifying…" : "ZK ✓"}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
+                                                        ZK —
+                                                    </span>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
                                 {listing.description && (
                                     <p className="text-gray-600 text-sm mb-3 line-clamp-2">
                                         {listing.description}
