@@ -169,9 +169,37 @@ else
     echo -e "${YELLOW}6. Skipping Rust compilation (Cargo not available)...${NC}"
 fi
 
+# Compile ZK host binary
+if [ "$RUST_AVAILABLE" = true ]; then
+    echo -e "${GREEN}7. Compiling ZK host binary (zk-host)...${NC}"
+    if [ -d "src/zk" ]; then
+        cd src/zk
+        ZK_BINARY="target/release/zk-host"
+        if [ -f "$ZK_BINARY" ]; then
+            echo -e "   ✅ zk-host already compiled: $ZK_BINARY"
+            echo -e "   ${YELLOW}   (Delete to force recompilation)${NC}"
+        else
+            echo -e "   Compiling zk-host (this may take several minutes)..."
+            echo -e "   ${YELLOW}   The guest ELF is pre-compiled; only standard Rust is needed.${NC}"
+            if cargo build --release -p zk-host; then
+                echo -e "   ✅ zk-host compiled successfully"
+            else
+                echo -e "   ${RED}❌ zk-host compilation failed${NC}"
+                echo -e "   ${YELLOW}   ZK proof generation will be unavailable.${NC}"
+                echo -e "   ${YELLOW}   Run manually: cd src/zk && cargo build --release -p zk-host${NC}"
+            fi
+        fi
+        cd ../..
+    else
+        echo -e "   ${YELLOW}⚠️  src/zk directory not found, skipping...${NC}"
+    fi
+else
+    echo -e "${YELLOW}7. Skipping zk-host compilation (Cargo not available)...${NC}"
+fi
+
 # Initialize database
 if [ "$SQLITE_AVAILABLE" = true ]; then
-    echo -e "${GREEN}7. Initializing database...${NC}"
+    echo -e "${GREEN}8. Initializing database...${NC}"
     if [ -f "src/app/db/init.sql" ]; then
         mkdir -p src/app/db
         if [ ! -f "src/app/db/sox.sqlite" ]; then
@@ -185,20 +213,20 @@ if [ "$SQLITE_AVAILABLE" = true ]; then
         echo -e "   ${YELLOW}⚠️  init.sql not found, skipping database initialization...${NC}"
     fi
 else
-    echo -e "${YELLOW}7. Skipping database initialization (sqlite3 not available)...${NC}"
+    echo -e "${YELLOW}8. Skipping database initialization (sqlite3 not available)...${NC}"
 fi
 
 # Install pnpm if needed
 if [ "$INSTALL_PNPM" = true ]; then
-    echo -e "${GREEN}8. Installing pnpm globally...${NC}"
+    echo -e "${GREEN}9. Installing pnpm globally...${NC}"
     npm install -g pnpm
     echo -e "   ✅ pnpm installed"
 else
-    echo -e "${GREEN}8. pnpm already installed${NC}"
+    echo -e "${GREEN}9. pnpm already installed${NC}"
 fi
 
 # Install Alto bundler
-echo -e "${GREEN}9. Setting up Alto bundler...${NC}"
+echo -e "${GREEN}10. Setting up Alto bundler...${NC}"
 if [ -f "install-alto.sh" ]; then
     # Vérifier si Alto est déjà installé et construit
     if [ -d "bundler-alto" ] && [ -d "bundler-alto/node_modules" ] && ([ -f "bundler-alto/alto" ] || [ -f "bundler-alto/src/esm/cli/alto.js" ]); then

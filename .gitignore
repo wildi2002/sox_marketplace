@@ -51,6 +51,11 @@ src/app/uploads/*
 # build target of the wasm
 src/wasm/target
 
+# build target of the ZK host (12 GB, must not be committed)
+# The guest ELF (src/zk/zk-guest/elf/) IS checked in so the host
+# can be compiled without the succinct toolchain on other machines.
+src/zk/target/
+
 tmp/
 
 # database files

@@ -1,0 +1,12 @@
+[package]
+name = "zk-guest"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "zk-guest"
+path = "src/main.rs"
+
+[dependencies]
+sp1-zkvm = "4"
+zk-common = { path = "../zk-common" }

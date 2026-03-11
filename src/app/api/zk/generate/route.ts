@@ -9,7 +9,6 @@ const execFileAsync = promisify(execFile);
 const ZK_HOST_PATH = path.join(process.cwd(), "src", "zk", "target", "release", "zk-host");
 const BRISQUE_SCRIPT = path.join(process.cwd(), "src", "scripts", "brisque_score.py");
 
-// Resolve python3 path: prefer miniconda, fall back to system python3
 function findPython3(): string {
     const candidates = [
         "/Users/timo/miniconda3/bin/python3",
@@ -24,26 +23,33 @@ function findPython3(): string {
 }
 const PYTHON3 = findPython3();
 
-async function computeBrisque(imageHex: string, width: number, height: number): Promise<number | null> {
+function ensureTmpDir(): string {
     const tmpDir = path.join(process.cwd(), "tmp");
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    return tmpDir;
+}
 
+// Fallback: compute BRISQUE via Python from RGBA bytes (when zk-host unavailable)
+async function computeBrisqueFallback(
+    imageHex: string,
+    width: number,
+    height: number
+): Promise<number | null> {
+    const tmpDir = ensureTmpDir();
     const tmpPath = path.join(tmpDir, `brisque_${Date.now()}_${Math.random().toString(36).slice(2)}.rgba`);
     try {
         const raw = Buffer.from(imageHex.startsWith("0x") ? imageHex.slice(2) : imageHex, "hex");
         fs.writeFileSync(tmpPath, raw);
-
-        const { stdout } = await execFileAsync(PYTHON3, [BRISQUE_SCRIPT, tmpPath, String(width), String(height)], {
-            timeout: 60000,
-        });
+        const { stdout } = await execFileAsync(
+            PYTHON3,
+            [BRISQUE_SCRIPT, tmpPath, String(width), String(height)],
+            { timeout: 60000 }
+        );
         const result = JSON.parse(stdout.trim());
-        if (result.error) {
-            console.error("BRISQUE script error:", result.error);
-            return null;
-        }
+        if (result.error) { console.error("BRISQUE script error:", result.error); return null; }
         return typeof result.brisque === "number" ? result.brisque : null;
     } catch (e: any) {
-        console.error("BRISQUE computation failed:", e.message);
+        console.error("BRISQUE fallback failed:", e.message);
         return null;
     } finally {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
@@ -53,60 +59,80 @@ async function computeBrisque(imageHex: string, width: number, height: number): 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { image_hex, key_hex, width, height } = body;
+        // Two modes:
+        // 1. Full ZK: { image_file_hex } — original JPEG/PNG bytes, uses zk-host binary
+        // 2. BRISQUE fallback: { image_hex, width, height } — RGBA bytes from canvas
+        const { image_file_hex, image_hex, width, height } = body;
 
-        if (!image_hex) {
-            return NextResponse.json({ error: "image_hex is required" }, { status: 400 });
+        const tmpDir = ensureTmpDir();
+
+        // Mode 1: Full ZK proof via zk-host binary
+        if (image_file_hex && fs.existsSync(ZK_HOST_PATH)) {
+            const imgBytes = Buffer.from(
+                image_file_hex.startsWith("0x") ? image_file_hex.slice(2) : image_file_hex,
+                "hex"
+            );
+            // Detect format from magic bytes to choose extension
+            const ext = imgBytes[0] === 0xff && imgBytes[1] === 0xd8 ? ".jpg" : ".png";
+            const tmpImg = path.join(tmpDir, `zk_img_${Date.now()}${ext}`);
+            fs.writeFileSync(tmpImg, imgBytes);
+            try {
+                const env = { ...process.env, SP1_PROVER: process.env.SP1_PROVER ?? "cpu" };
+                const { stdout } = await execFileAsync(
+                    ZK_HOST_PATH,
+                    ["generate", "--image", tmpImg],
+                    { timeout: 1800000, env } // 30 min timeout for proof generation
+                );
+                const result = JSON.parse(stdout.trim());
+                return NextResponse.json(result);
+            } catch (zkErr: any) {
+                // zk-host crashed or panicked — fall through to BRISQUE-only fallback
+                console.error("zk-host generate failed, falling back to BRISQUE:", zkErr.message);
+            } finally {
+                if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg);
+            }
         }
 
-        // Always compute BRISQUE if width/height are provided
+        // Mode 2: BRISQUE-only fallback (no zk-host or no image_file_hex)
         let brisque: number | null = null;
-        if (width && height) {
-            brisque = await computeBrisque(image_hex, width, height);
-        }
-
-        // Try ZK binary if available
-        if (!fs.existsSync(ZK_HOST_PATH)) {
-            return NextResponse.json({
-                available: false,
-                brisque,
-                proof: null,
-                h_ct: null,
-                c_k: null,
-            });
-        }
-
-        const tmpDir = path.join(process.cwd(), "tmp");
-        if (!fs.existsSync(tmpDir)) {
-            fs.mkdirSync(tmpDir, { recursive: true });
-        }
-
-        const tmpImagePath = path.join(tmpDir, `zk_image_${Date.now()}_${Math.random().toString(36).slice(2)}.bin`);
-
-        try {
-            const imageBytes = Buffer.from(image_hex.startsWith("0x") ? image_hex.slice(2) : image_hex, "hex");
-            fs.writeFileSync(tmpImagePath, imageBytes);
-
-            const args = ["--generate", tmpImagePath];
-            if (key_hex) {
-                args.push("--key", key_hex.startsWith("0x") ? key_hex.slice(2) : key_hex);
-            }
-
-            const { stdout } = await execFileAsync(ZK_HOST_PATH, args, { timeout: 600000 });
-            const result = JSON.parse(stdout.toString());
-
-            return NextResponse.json({
-                available: true,
-                brisque: result.brisque ?? brisque,
-                proof: result.proof ?? null,
-                h_ct: result.h_ct ?? null,
-                c_k: result.c_k ?? null,
-            });
-        } finally {
-            if (fs.existsSync(tmpImagePath)) {
-                fs.unlinkSync(tmpImagePath);
+        if (image_hex && width && height) {
+            brisque = await computeBrisqueFallback(image_hex, width, height);
+        } else if (image_file_hex) {
+            // zk-host not available but we have the file — compute BRISQUE via Python on image file
+            const imgBytes = Buffer.from(
+                image_file_hex.startsWith("0x") ? image_file_hex.slice(2) : image_file_hex,
+                "hex"
+            );
+            const ext = imgBytes[0] === 0xff && imgBytes[1] === 0xd8 ? ".jpg" : ".png";
+            const tmpImg = path.join(tmpDir, `brisque_img_${Date.now()}${ext}`);
+            fs.writeFileSync(tmpImg, imgBytes);
+            try {
+                // Use Python with image file directly
+                const { stdout } = await execFileAsync(
+                    PYTHON3,
+                    ["-c", `
+import sys, json
+import numpy as np
+from brisque import BRISQUE
+import skimage.io
+img = skimage.io.imread('${tmpImg}')
+if len(img.shape) == 3 and img.shape[2] == 4: img = img[:,:,:3]
+bq = BRISQUE()
+score = float(bq.score(img))
+print(json.dumps({'brisque': score}))
+`],
+                    { timeout: 60000 }
+                );
+                const r = JSON.parse(stdout.trim());
+                brisque = r.brisque ?? null;
+            } catch (e: any) {
+                console.error("BRISQUE from file failed:", e.message);
+            } finally {
+                if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg);
             }
         }
+
+        return NextResponse.json({ available: false, brisque, proof: null, h_ct: null, c_k: null });
     } catch (error: any) {
         console.error("Error in POST /api/zk/generate:", error);
         return NextResponse.json({ error: error.message }, { status: 500 });

@@ -21,8 +21,10 @@ type Listing = {
     preview_image?: string;
     brisque_value?: number | null;
     zk_proof?: string | null;
+    zk_proof_full?: string | null;
     zk_h_ct?: string | null;
     zk_c_k?: string | null;
+    zk_thumbnail_hash?: string | null;
     preview_hash?: string | null;
 };
 
@@ -98,10 +100,12 @@ export default function MarketplacePage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     proof: listing.zk_proof,
+                    proof_full: listing.zk_proof_full ?? null,
                     h_ct: listing.zk_h_ct,
                     preview_hash: listing.preview_hash,
                     brisque: listing.brisque_value ?? null,
                     c_k: listing.zk_c_k,
+                    thumbnail_hash: listing.zk_thumbnail_hash ?? null,
                 }),
             });
             const data = await res.json();

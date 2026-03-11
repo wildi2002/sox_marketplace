@@ -99,8 +99,10 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [brisqueValue, setBrisqueValue] = useState<number | null>(null);
     const [zkStatus, setZkStatus] = useState<ZkStatus>("idle");
     const [zkProof, setZkProof] = useState<string | null>(null);
+    const [zkProofFull, setZkProofFull] = useState<string | null>(null);
     const [zkHCt, setZkHCt] = useState<string | null>(null);
     const [zkCK, setZkCK] = useState<string | null>(null);
+    const [zkThumbnailHash, setZkThumbnailHash] = useState<string | null>(null);
 
     const [zkElapsed, setZkElapsed] = useState(0);
     const zkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -126,8 +128,10 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setBrisqueValue(null);
         setZkStatus("idle");
         setZkProof(null);
+        setZkProofFull(null);
         setZkHCt(null);
         setZkCK(null);
+        setZkThumbnailHash(null);
         setZkElapsed(0);
         if (zkTimerRef.current) { clearInterval(zkTimerRef.current); zkTimerRef.current = null; }
 
@@ -136,32 +140,56 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             setPreviewDataUrl(dataUrl);
             setPreviewHash(hash);
 
-            // Step 1: compute BRISQUE server-side (Python, ~1s)
+            // Step 1: send original image + RGBA fallback to server for BRISQUE + ZK proof
             setZkStatus("computing_brisque");
             const startTime = Date.now();
             zkTimerRef.current = setInterval(() => setZkElapsed(Date.now() - startTime), 100);
 
+            // Read original file bytes for full ZK proof (JPEG/PNG)
+            const fileBytes = new Uint8Array(await file.arrayBuffer());
+            const imageFileHex = Array.from(fileBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+            // RGBA fallback for Python BRISQUE
             const imageHex = Array.from(rgbaBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+
             let brisqueVal: number | null = null;
+            let zkProofVal: string | null = null;
+            let zkHCtVal: string | null = null;
+            let zkCKVal: string | null = null;
+            let zkAvailable = false;
+
             try {
                 const zkRes = await fetch("/api/zk/generate", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ image_hex: imageHex, width, height }),
+                    body: JSON.stringify({ image_file_hex: imageFileHex, image_hex: imageHex, width, height }),
                 });
                 if (zkRes.ok) {
                     const zkData = await zkRes.json();
                     brisqueVal = zkData.brisque ?? null;
                     setBrisqueValue(brisqueVal);
+                    if (zkData.available) {
+                        zkProofVal = zkData.proof ?? null;
+                        zkHCtVal = zkData.h_ct ?? null;
+                        zkCKVal = zkData.c_k ?? null;
+                        zkAvailable = true;
+                        setZkProofFull(zkData.proof_full ?? null);
+                        setZkThumbnailHash(zkData.thumbnail_hash ?? null);
+                    }
                 }
             } catch (e: any) {
-                console.warn("BRISQUE server call failed:", e?.message);
+                console.warn("ZK/BRISQUE server call failed:", e?.message);
             }
 
             if (zkTimerRef.current) { clearInterval(zkTimerRef.current); zkTimerRef.current = null; }
 
-            // Step 2: compute ZK commitment locally in browser (instant)
-            if (brisqueVal !== null) {
+            if (zkAvailable && zkProofVal) {
+                // Full SP1 ZK proof from server
+                setZkProof(zkProofVal);
+                setZkHCt(zkHCtVal);
+                setZkCK(zkCKVal);
+                setZkStatus("done");
+            } else if (brisqueVal !== null) {
+                // Fallback: hash-based commitment in browser
                 setZkStatus("computing_zk");
                 const { proof, c_k } = await computeZkCommitment(hash, brisqueVal);
                 setZkProof(proof);
@@ -211,8 +239,10 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                 body.preview_hash = previewHash;
                 body.brisque_value = brisqueValue;
                 body.zk_proof = zkProof;
+                body.zk_proof_full = zkProofFull;
                 body.zk_h_ct = zkHCt;
                 body.zk_c_k = zkCK;
+                body.zk_thumbnail_hash = zkThumbnailHash;
             }
 
             const res = await fetch("/api/listings", {
@@ -310,7 +340,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                                     )}
                                     {zkStatus === "unavailable" && (
                                         <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-500">
-                                            ZK unavailable (BRISQUE failed)
+                                            ZK unavailable
                                         </span>
                                     )}
                                     {brisqueValue !== null && (
