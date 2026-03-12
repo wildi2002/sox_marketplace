@@ -260,5 +260,19 @@ try {
         console.warn("Warning adding zk_c_k to contracts:", e.message);
     }
 }
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_proof_full TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_proof_full to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_thumbnail_hash TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_thumbnail_hash to contracts:", e.message);
+    }
+}
 
 export default db;

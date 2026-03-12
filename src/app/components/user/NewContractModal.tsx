@@ -22,11 +22,14 @@ interface NewContractModalProps {
     prefillTipDispute?: string;
     prefillTimeoutDelay?: string;
     listingType?: string;
+    listingPreviewImage?: string | null;
     listingPreviewHash?: string | null;
     listingBrisqueValue?: number | null;
     listingZkProof?: string | null;
+    listingZkProofFull?: string | null;
     listingZkHCt?: string | null;
     listingZkCK?: string | null;
+    listingZkThumbnailHash?: string | null;
 }
 
 export default function NewContractModal({
@@ -40,11 +43,14 @@ export default function NewContractModal({
     prefillTipDispute,
     prefillTimeoutDelay,
     listingType,
+    listingPreviewImage,
     listingPreviewHash,
     listingBrisqueValue,
     listingZkProof,
+    listingZkProofFull,
     listingZkHCt,
     listingZkCK,
+    listingZkThumbnailHash,
 }: NewContractModalProps) {
     const [buyerPk, setBuyerPk] = useState(prefillBuyerPk ?? "");
     const [price, setPrice] = useState(prefillPrice ?? "");
@@ -173,11 +179,14 @@ export default function NewContractModal({
                         timeout_delay: timeoutDelay,
                         algorithm_suite: algorithms,
                         listing_type: listingType ?? null,
+                        preview_image: listingPreviewImage ?? null,
                         preview_hash: listingPreviewHash ?? null,
                         brisque_value: listingBrisqueValue ?? null,
                         zk_proof: listingZkProof ?? null,
+                        zk_proof_full: listingZkProofFull ?? null,
                         zk_h_ct: listingZkHCt ?? null,
                         zk_c_k: listingZkCK ?? null,
+                        zk_thumbnail_hash: listingZkThumbnailHash ?? null,
                     }),
                 });
 
@@ -309,11 +318,14 @@ export default function NewContractModal({
                     timeout_delay: timeoutDelay,
                     algorithm_suite: algorithms,
                     listing_type: listingType ?? null,
+                    preview_image: listingPreviewImage ?? null,
                     preview_hash: listingPreviewHash ?? null,
                     brisque_value: listingBrisqueValue ?? null,
                     zk_proof: listingZkProof ?? null,
+                    zk_proof_full: listingZkProofFull ?? null,
                     zk_h_ct: listingZkHCt ?? null,
                     zk_c_k: listingZkCK ?? null,
+                    zk_thumbnail_hash: listingZkThumbnailHash ?? null,
                 }),
             });
 

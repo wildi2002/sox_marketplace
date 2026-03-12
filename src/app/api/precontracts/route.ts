@@ -257,11 +257,14 @@ export async function PUT(req: Request) {
                 file_path: filePath || "",
                 file_name: preOut.file_name || "",
                 listing_type: data.listing_type || null,
+                preview_image: data.preview_image || null,
                 preview_hash: data.preview_hash || null,
                 brisque_value: data.brisque_value ?? null,
                 zk_proof: data.zk_proof || null,
+                zk_proof_full: data.zk_proof_full || null,
                 zk_h_ct: data.zk_h_ct || null,
                 zk_c_k: data.zk_c_k || null,
+                zk_thumbnail_hash: data.zk_thumbnail_hash || null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -279,16 +282,16 @@ export async function PUT(req: Request) {
                 num_gates, commitment, tip_completion, tip_dispute,
                 protocol_version, timeout_delay, algorithm_suite,
                 accepted, file_name,
-                listing_type, preview_hash, brisque_value,
-                zk_proof, zk_h_ct, zk_c_k
+                listing_type, preview_image, preview_hash, brisque_value,
+                zk_proof, zk_proof_full, zk_h_ct, zk_c_k, zk_thumbnail_hash
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?,
                 0, ?,
-                ?, ?, ?,
-                ?, ?, ?
+                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -306,11 +309,14 @@ export async function PUT(req: Request) {
                 contractData.algorithm_suite,
                 contractData.file_name,
                 contractData.listing_type,
+                contractData.preview_image,
                 contractData.preview_hash,
                 contractData.brisque_value,
                 contractData.zk_proof,
+                contractData.zk_proof_full,
                 contractData.zk_h_ct,
-                contractData.zk_c_k
+                contractData.zk_c_k,
+                contractData.zk_thumbnail_hash
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);
