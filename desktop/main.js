@@ -156,6 +156,31 @@ async function uploadCiphertext(filePath, contractId) {
     });
 }
 
+const ZK_HOST_PATH = path.join(__dirname, '..', 'src', 'zk', 'target', 'release', 'zk-host');
+
+function runZkHost(args, env = {}) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(ZK_HOST_PATH, args, {
+            cwd: path.join(__dirname, '..'),
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, SP1_PROVER: 'cpu', ...env },
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (d) => { stdout += d.toString(); });
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('close', (code) => {
+            if (code === 0) {
+                try { resolve(JSON.parse(stdout.trim())); }
+                catch (e) { resolve({ raw: stdout }); }
+            } else {
+                reject(new Error(stderr || `zk-host exited with code ${code}`));
+            }
+        });
+        child.on('error', reject);
+    });
+}
+
 // Expose API to preload
 const { ipcMain } = require('electron');
 
@@ -182,6 +207,79 @@ ipcMain.handle('precompute', async () => {
         return {
             error: error.message || 'Unknown error during precompute',
         };
+    }
+});
+
+// analyzeImage: fast BRISQUE + thumbnail_hash without proof generation (for listings)
+ipcMain.handle('analyzeImage', async () => {
+    try {
+        if (!fs.existsSync(ZK_HOST_PATH)) {
+            return { error: 'zk-host binary not found. Run: cd src/zk && cargo build --release -p zk-host' };
+        }
+        const result = await dialog.showOpenDialog(mainWindow, {
+            title: 'Select image to list',
+            properties: ['openFile'],
+            filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
+        });
+        if (result.canceled) return { cancelled: true };
+        const filePath = result.filePaths[0];
+
+        // Run fast analyze (thumbnail_hash + BRISQUE, no SP1 proof)
+        const analyzed = await runZkHost(['analyze', '--image', filePath]);
+
+        // Read image bytes so the renderer can build a preview thumbnail locally
+        const imageBytes = fs.readFileSync(filePath);
+        const ext = path.extname(filePath).slice(1).toLowerCase();
+        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
+        const imageDataUrl = `data:${mime};base64,${imageBytes.toString('base64')}`;
+
+        return {
+            success: true,
+            filePath,
+            imageDataUrl,
+            thumbnail_hash: analyzed.thumbnail_hash,
+            brisque: analyzed.brisque,
+        };
+    } catch (error) {
+        return { error: error.message || 'analyzeImage failed' };
+    }
+});
+
+// generateZkProof: full SP1 Groth16 proof generation for a precontract (slow, minutes)
+ipcMain.handle('generateZkProof', async (_event, payload) => {
+    try {
+        if (!fs.existsSync(ZK_HOST_PATH)) {
+            return { error: 'zk-host binary not found' };
+        }
+        const { filePath } = payload || {};
+        if (!filePath || !fs.existsSync(filePath)) {
+            return { error: `Image file not found: ${filePath}` };
+        }
+        const result = await runZkHost(['generate', '--image', filePath]);
+        return { success: true, ...result };
+    } catch (error) {
+        return { error: error.message || 'generateZkProof failed' };
+    }
+});
+
+// verifyZkProof: verify a ZK proof locally (no network, no server) for the buyer
+ipcMain.handle('verifyZkProof', async (_event, payload) => {
+    try {
+        if (!fs.existsSync(ZK_HOST_PATH)) {
+            return { error: 'zk-host binary not found' };
+        }
+        const tmpDir = path.join(__dirname, '..', 'tmp');
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+        const tmpJson = path.join(tmpDir, `zk_verify_${Date.now()}.json`);
+        try {
+            fs.writeFileSync(tmpJson, JSON.stringify(payload));
+            const result = await runZkHost(['verify', '--json', tmpJson]);
+            return result;
+        } finally {
+            if (fs.existsSync(tmpJson)) fs.unlinkSync(tmpJson);
+        }
+    } catch (error) {
+        return { error: error.message || 'verifyZkProof failed' };
     }
 });
 

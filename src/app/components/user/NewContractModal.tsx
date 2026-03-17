@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Modal from "../common/Modal";
 import Button from "../common/Button";
 import FormTextField from "../common/FormTextField";
@@ -10,6 +10,25 @@ import { isAddress } from "ethers";
 import initWasm, { compute_precontract_values, bytes_to_hex } from "@/app/lib/crypto_lib";
 import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
 import { useToast } from "@/app/lib/ToastContext";
+
+// Browser-side hash commitment fallback when SP1 ZK proof is unavailable.
+// Computes proof = SHA256(preview_hash_bytes || brisque_float32_LE).
+// Verifiable by /api/zk/verify (verifyHashCommitment path).
+async function computeHashCommitment(previewHashHex: string, brisqueValue: number): Promise<{
+    proof: string; c_k: string; thumbnail_hash: string; brisque: number;
+}> {
+    const hex = previewHashHex.replace("0x", "");
+    const ckBytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < ckBytes.length; i++) ckBytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    const brisqueBuf = new ArrayBuffer(4);
+    new DataView(brisqueBuf).setFloat32(0, brisqueValue, true);
+    const combined = new Uint8Array(ckBytes.length + 4);
+    combined.set(ckBytes);
+    combined.set(new Uint8Array(brisqueBuf), ckBytes.length);
+    const hashBuf = await crypto.subtle.digest("SHA-256", combined);
+    const proof = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return { proof, c_k: hex, thumbnail_hash: hex, brisque: brisqueValue };
+}
 
 interface NewContractModalProps {
     onClose: () => void;
@@ -25,11 +44,6 @@ interface NewContractModalProps {
     listingPreviewImage?: string | null;
     listingPreviewHash?: string | null;
     listingBrisqueValue?: number | null;
-    listingZkProof?: string | null;
-    listingZkProofFull?: string | null;
-    listingZkHCt?: string | null;
-    listingZkCK?: string | null;
-    listingZkThumbnailHash?: string | null;
 }
 
 export default function NewContractModal({
@@ -46,11 +60,6 @@ export default function NewContractModal({
     listingPreviewImage,
     listingPreviewHash,
     listingBrisqueValue,
-    listingZkProof,
-    listingZkProofFull,
-    listingZkHCt,
-    listingZkCK,
-    listingZkThumbnailHash,
 }: NewContractModalProps) {
     const [buyerPk, setBuyerPk] = useState(prefillBuyerPk ?? "");
     const [price, setPrice] = useState(prefillPrice ?? "");
@@ -65,9 +74,18 @@ export default function NewContractModal({
     const ethChfRate = useEthChfRate();
     const { showToast } = useToast();
 
-    // Spécifique mode Electron : on veut une seule fenêtre de sélection
+    // Electron mode state
     const [isElectron, setIsElectron] = useState(false);
     const [preOutElectron, setPreOutElectron] = useState<any | null>(null);
+
+    // ZK proof state (generated per precontract in Electron mode)
+    type ZkProofStatus = "idle" | "generating" | "done" | "failed";
+    const [zkProofStatus, setZkProofStatus] = useState<ZkProofStatus>("idle");
+    const [zkProofData, setZkProofData] = useState<any | null>(null);
+    const [zkElapsed, setZkElapsed] = useState(0);
+    const zkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    useEffect(() => () => { if (zkTimerRef.current) clearInterval(zkTimerRef.current); }, []);
 
     useEffect(() => {
         const anyWindow: any = typeof window !== "undefined" ? window : {};
@@ -80,27 +98,65 @@ export default function NewContractModal({
         try {
             const anyWindow: any = typeof window !== "undefined" ? window : {};
             if (!anyWindow.electronAPI || typeof anyWindow.electronAPI.precompute !== "function") {
-                showToast("Electron-Modus nicht erkannt.", "error");
+                showToast("Electron mode not detected.", "error");
                 return null;
             }
 
-            // Ouvre UNE SEULE fois la fenêtre native et lance precontract_cli
             const preOut = await anyWindow.electronAPI.precompute();
 
             if (preOut.cancelled) {
                 return null;
             }
             if (preOut.error) {
-                console.error("Erreur precompute natif via Electron:", preOut.error);
-                showToast(`Fehler bei nativem Precompute: ${preOut.error}`, "error");
+                showToast(`Precompute failed: ${preOut.error}`, "error");
                 return null;
             }
 
             setPreOutElectron(preOut);
-            return preOut;
+
+            // For image listings: generate ZK proof (SP1 via Electron, fallback to hash commitment)
+            let localZkData: any = null;
+            if (listingType === "image") {
+                setZkProofStatus("generating");
+                setZkProofData(null);
+                setZkElapsed(0);
+                const start = Date.now();
+                zkTimerRef.current = setInterval(() => setZkElapsed(Date.now() - start), 500);
+                try {
+                    let sp1Failed = true;
+                    if (preOut.inputPath) {
+                        const zkResult = await anyWindow.electronAPI.generateZkProof({ filePath: preOut.inputPath });
+                        if (!zkResult.error) {
+                            sp1Failed = false;
+                            localZkData = zkResult;
+                        }
+                    }
+                    if (sp1Failed && listingPreviewHash && listingBrisqueValue != null) {
+                        // SP1 unavailable — fall back to browser hash commitment
+                        localZkData = await computeHashCommitment(listingPreviewHash, listingBrisqueValue);
+                    }
+                } catch (e: any) {
+                    // SP1 threw — try hash commitment fallback
+                    if (listingPreviewHash && listingBrisqueValue != null) {
+                        try {
+                            localZkData = await computeHashCommitment(listingPreviewHash, listingBrisqueValue);
+                        } catch { /* leave null */ }
+                    }
+                } finally {
+                    if (zkTimerRef.current) { clearInterval(zkTimerRef.current); zkTimerRef.current = null; }
+                }
+                if (localZkData) {
+                    setZkProofData(localZkData);
+                    setZkProofStatus("done");
+                } else {
+                    setZkProofStatus("failed");
+                }
+            }
+
+            // Return both preOut and the ZK data so callers aren't affected by stale React state
+            return { preOut, zkData: localZkData };
         } catch (e: any) {
-            console.error("Fehler bei der Dateiauswahl im Electron-Modus:", e);
-            showToast(`Fehler: ${e.message || e.toString()}`, "error");
+            showToast(`Error: ${e.message || e.toString()}`, "error");
             return null;
         }
     };
@@ -154,14 +210,16 @@ export default function NewContractModal({
             if (anyWindow.electronAPI && typeof anyWindow.electronAPI.precompute === "function") {
                 // Si l'utilisateur n'a pas encore cliqué sur "Choisir le fichier",
                 // on lance automatiquement le flux de sélection + calcul ici.
+                // Use already-computed preOut+zkData if available, else trigger file selection now
                 let preOut = preOutElectron;
+                let zkData = zkProofData; // may be set if user clicked "Choose file" earlier
                 if (!preOut) {
-                    preOut = await handleElectronChooseFile();
+                    const result = await handleElectronChooseFile();
+                    if (!result) return;
+                    preOut = result.preOut;
+                    zkData = result.zkData; // use the directly returned value, not stale state
                 }
-                if (!preOut) {
-                    // L'utilisateur a peut-être annulé la sélection ou il y a eu une erreur.
-                    return;
-                }
+                if (!preOut) return;
 
                 const response_raw = await fetch("/api/precontracts", {
                     method: "PUT",
@@ -182,11 +240,13 @@ export default function NewContractModal({
                         preview_image: listingPreviewImage ?? null,
                         preview_hash: listingPreviewHash ?? null,
                         brisque_value: listingBrisqueValue ?? null,
-                        zk_proof: listingZkProof ?? null,
-                        zk_proof_full: listingZkProofFull ?? null,
-                        zk_h_ct: listingZkHCt ?? null,
-                        zk_c_k: listingZkCK ?? null,
-                        zk_thumbnail_hash: listingZkThumbnailHash ?? null,
+                        // Fresh per-precontract ZK proof (generated locally in Electron)
+                        zk_proof: zkData?.proof ?? null,
+                        zk_proof_full: zkData?.proof_full ?? null,
+                        zk_h_ct: zkData?.h_ct ?? null,
+                        zk_c_k: zkData?.c_k ?? null,
+                        zk_thumbnail_hash: zkData?.thumbnail_hash ?? null,
+                        zk_brisque: zkData?.brisque ?? null,
                     }),
                 });
 
@@ -304,6 +364,14 @@ export default function NewContractModal({
                 file_name: file[0].name,
             };
 
+            // Web mode: compute hash commitment in browser if this is an image listing
+            let webZkData: any = null;
+            if (listingType === "image" && listingPreviewHash && listingBrisqueValue != null) {
+                try {
+                    webZkData = await computeHashCommitment(listingPreviewHash, listingBrisqueValue);
+                } catch { /* leave null */ }
+            }
+
             const response_raw = await fetch("/api/precontracts", {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
@@ -321,11 +389,12 @@ export default function NewContractModal({
                     preview_image: listingPreviewImage ?? null,
                     preview_hash: listingPreviewHash ?? null,
                     brisque_value: listingBrisqueValue ?? null,
-                    zk_proof: listingZkProof ?? null,
-                    zk_proof_full: listingZkProofFull ?? null,
-                    zk_h_ct: listingZkHCt ?? null,
-                    zk_c_k: listingZkCK ?? null,
-                    zk_thumbnail_hash: listingZkThumbnailHash ?? null,
+                    zk_proof: webZkData?.proof ?? null,
+                    zk_proof_full: null,
+                    zk_h_ct: null,
+                    zk_c_k: webZkData?.c_k ?? null,
+                    zk_thumbnail_hash: webZkData?.thumbnail_hash ?? null,
+                    zk_brisque: webZkData?.brisque ?? null,
                 }),
             });
 
@@ -511,28 +580,54 @@ export default function NewContractModal({
                 )}
 
                 {isElectron && (
-                    <div className="flex flex-col gap-2">
+                    <div className="col-span-2 flex flex-col gap-2">
                         <Button
-                            label="Choisir le fichier (calcul local rapide)"
+                            label="Choose file (local encryption)"
                             onClick={handleElectronChooseFile}
                             width="full"
+                            isDisabled={zkProofStatus === "generating"}
                         />
-                        <p className="text-sm text-gray-600">
-                            {preOutElectron && preOutElectron.inputPath
-                                ? `Fichier sélectionné : ${preOutElectron.inputPath}`
-                                : "Aucun fichier sélectionné pour l'instant."}
-                        </p>
+                        {preOutElectron?.inputPath && (
+                            <p className="text-xs text-gray-500 break-all">
+                                Selected: {preOutElectron.inputPath}
+                            </p>
+                        )}
+                        {zkProofStatus === "generating" && (
+                            <p className="text-xs text-blue-600">
+                                Generating quality commitment… {(zkElapsed / 1000).toFixed(0)}s
+                                {zkElapsed > 5000 ? " (SP1 proof — may take several minutes)" : ""}
+                            </p>
+                        )}
+                        {zkProofStatus === "done" && zkProofData && (
+                            <div className="text-xs text-green-700 space-y-0.5">
+                                <p className="font-medium">
+                                    ✓ Quality commitment ready — will be sent with precontract
+                                </p>
+                                <p className="text-gray-500">
+                                    Type: {zkProofData.proof_full ? "SP1 ZK Proof (Groth16)" : "Hash Commitment (SHA-256 fallback)"}
+                                    {typeof zkProofData.brisque === "number" ? ` · BRISQUE: ${zkProofData.brisque.toFixed(1)}` : ""}
+                                </p>
+                                <p className="text-gray-400">
+                                    The buyer will automatically verify this when they open the precontract.
+                                </p>
+                            </div>
+                        )}
+                        {zkProofStatus === "failed" && (
+                            <p className="text-xs text-red-600">
+                                Could not generate quality commitment. Submit anyway to proceed without proof.
+                            </p>
+                        )}
                     </div>
                 )}
 
                 <div className="col-span-2 flex gap-8">
                     <Button
-                        label={isComputing ? "Encrypting..." : "Submit"}
+                        label={isComputing ? "Encrypting..." : zkProofStatus === "generating" ? "Generating ZK proof..." : "Submit"}
                         onClick={handleSubmit}
                         width="1/2"
-                        isDisabled={isComputing}
+                        isDisabled={isComputing || zkProofStatus === "generating"}
                     />
-                    <Button label="Cancel" onClick={onClose} width="1/2" isDisabled={isComputing} />
+                    <Button label="Cancel" onClick={onClose} width="1/2" isDisabled={isComputing || zkProofStatus === "generating"} />
                 </div>
             </div>
         </Modal>

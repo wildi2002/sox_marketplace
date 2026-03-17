@@ -143,16 +143,23 @@ export default function WaitingDisputeSponsorsListView() {
                                         : "Not set"}
                                 </td>
                                 <td className="p-2 w-1/6 text-center">
-                                    <Button
-                                        label={
-                                            c.stateName === "WaitSB"
-                                                ? "Sponsor buyer"
-                                                : "Sponsor vendor"
-                                        }
-                                        onClick={() => handleSendFee(c)}
-                                        width="full"
-                                        isDisabled={isLoading}
-                                    />
+                                    {(c.stateName === "WaitSB" && c.pk_buyer_sponsor) ||
+                                     (c.stateName === "WaitSV" && c.pk_vendor_sponsor) ? (
+                                        <span className="text-green-600 text-sm">
+                                            ✓ Sponsored
+                                        </span>
+                                    ) : (
+                                        <Button
+                                            label={
+                                                c.stateName === "WaitSB"
+                                                    ? "Sponsor buyer"
+                                                    : "Sponsor vendor"
+                                            }
+                                            onClick={() => handleSendFee(c)}
+                                            width="full"
+                                            isDisabled={isLoading}
+                                        />
+                                    )}
                                 </td>
                             </tr>
                         ))}

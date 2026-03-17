@@ -269,6 +269,26 @@ export function hpre(evaluated_circuit_bytes: Uint8Array, num_blocks: number, ch
  * A `Precontract` containing all necessary components for the optimistic phase of the protocol
  */
 export function compute_precontract_values_v2(file: Uint8Array, key: Uint8Array): Precontract;
+/**
+ * JavaScript-compatible wrapper for sha256_compress
+ *
+ * # Arguments
+ * * `data` - Vector of Uint8Arrays containing the input data
+ *
+ * # Returns
+ * A byte vector containing the compressed result
+ */
+export function sha256_compress_js(data: Uint8Array[]): Uint8Array;
+/**
+ * JavaScript-compatible wrapper for sha256_compress_final
+ *
+ * # Arguments
+ * * `data` - Vector of Uint8Arrays containing the input data
+ *
+ * # Returns
+ * A byte vector containing the final hash
+ */
+export function sha256_compress_final_js(data: Uint8Array[]): Uint8Array;
 export function hex_to_bytes(hex_str: string): Uint8Array;
 export function bytes_to_hex(vec: Uint8Array): string;
 /**
@@ -307,26 +327,6 @@ export function decrypt_block_js(data: Uint8Array[]): Uint8Array;
  * A `Commitment` containing the commitment hash and opening value
  */
 export function commit(data: Uint8Array): Commitment;
-/**
- * JavaScript-compatible wrapper for sha256_compress
- *
- * # Arguments
- * * `data` - Vector of Uint8Arrays containing the input data
- *
- * # Returns
- * A byte vector containing the compressed result
- */
-export function sha256_compress_js(data: Uint8Array[]): Uint8Array;
-/**
- * JavaScript-compatible wrapper for sha256_compress_final
- *
- * # Arguments
- * * `data` - Vector of Uint8Arrays containing the input data
- *
- * # Returns
- * A byte vector containing the final hash
- */
-export function sha256_compress_final_js(data: Uint8Array[]): Uint8Array;
 /**
  * JavaScript wrapper of the prove function
  *
@@ -828,6 +828,8 @@ export interface InitOutput {
   readonly __wbg_get_precontract_description: (a: number) => [number, number];
   readonly __wbg_get_precontract_h_circuit: (a: number) => [number, number];
   readonly __wbg_get_precontract_h_ct: (a: number) => [number, number];
+  readonly sha256_compress_final_js: (a: number, b: number) => [number, number];
+  readonly sha256_compress_js: (a: number, b: number) => [number, number];
   readonly bytes_to_hex: (a: number, b: number) => [number, number];
   readonly decrypt_block_js: (a: number, b: number) => [number, number];
   readonly hex_to_bytes: (a: number, b: number) => [number, number];
@@ -838,8 +840,6 @@ export interface InitOutput {
   readonly __wbg_set_commitment_c: (a: number, b: number, c: number) => void;
   readonly __wbg_set_commitment_o: (a: number, b: number, c: number) => void;
   readonly commit: (a: number, b: number) => number;
-  readonly sha256_compress_final_js: (a: number, b: number) => [number, number];
-  readonly sha256_compress_js: (a: number, b: number) => [number, number];
   readonly acc_js: (a: number, b: number) => [number, number];
   readonly prove_ext_js: (a: number, b: number) => any;
   readonly prove_js: (a: number, b: number, c: any) => any;

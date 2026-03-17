@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const {
             title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
-            listing_type, preview_image, preview_hash, brisque_value, zk_proof, zk_proof_full, zk_h_ct, zk_c_k, zk_thumbnail_hash,
+            listing_type, preview_image, preview_hash, brisque_value,
         } = body;
 
         if (!title || !price || !pk_vendor) {
@@ -32,8 +32,8 @@ export async function POST(req: NextRequest) {
 
         const result = db.prepare(`
             INSERT INTO listings (title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
-                listing_type, preview_image, preview_hash, brisque_value, zk_proof, zk_proof_full, zk_h_ct, zk_c_k, zk_thumbnail_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                listing_type, preview_image, preview_hash, brisque_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             title,
             description || "",
@@ -47,11 +47,6 @@ export async function POST(req: NextRequest) {
             preview_image ?? null,
             preview_hash ?? null,
             brisque_value ?? null,
-            zk_proof ?? null,
-            zk_proof_full ?? null,
-            zk_h_ct ?? null,
-            zk_c_k ?? null,
-            zk_thumbnail_hash ?? null,
         );
 
         return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 });

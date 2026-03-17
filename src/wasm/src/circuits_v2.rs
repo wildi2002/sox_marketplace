@@ -461,8 +461,9 @@ pub fn compile_circuit_v2(ct: &[u8], description: &[u8]) -> CompiledCircuitV2 {
 /// Accumulator for a V2 circuit (hashes encoded gates with keccak256).
 /// Optimized to encode and hash gates in parallel, avoiding intermediate storage.
 pub fn acc_circuit_v2(gates: &[GateV2]) -> Vec<u8> {
+    #[cfg(not(target_arch = "wasm32"))]
     use rayon::prelude::*;
-    
+
     if gates.is_empty() {
         return vec![];
     }
@@ -472,39 +473,38 @@ pub fn acc_circuit_v2(gates: &[GateV2]) -> Vec<u8> {
         return hash_block64(&enc.to_vec()).to_vec();
     }
 
-    // Parallel encode and hash: encode gates directly into stack buffer and hash
-    // This avoids storing all encoded gates in memory
-    // CRITICAL: Use indexed parallel iteration to preserve gate order deterministically
-    let hashes: Vec<[u8; 32]> = (0..gates.len())
-        .into_par_iter()
-        .map(|i| {
-            let mut enc = [0u8; 64];
-            gates[i].encode_into(&mut enc);
-            hash_block64(&enc)
-        })
-        .collect();
+    let hash_gate = |i: usize| -> [u8; 32] {
+        let mut enc = [0u8; 64];
+        gates[i].encode_into(&mut enc);
+        hash_block64(&enc)
+    };
 
-    // Parallel computation of Merkle tree layers
-    // CRITICAL: Use indexed parallel iteration to preserve order deterministically
-    let mut layer = hashes;
+    let mut layer: Vec<[u8; 32]> = {
+        #[cfg(not(target_arch = "wasm32"))]
+        { (0..gates.len()).into_par_iter().map(hash_gate).collect() }
+        #[cfg(target_arch = "wasm32")]
+        { (0..gates.len()).map(hash_gate).collect() }
+    };
+
+    let combine = |i: usize, lr: &Vec<[u8; 32]>| -> [u8; 32] {
+        if i + 1 < lr.len() {
+            let mut hasher = Keccak256::new();
+            hasher.update(&lr[i]);
+            hasher.update(&lr[i + 1]);
+            hasher.finalize().into()
+        } else {
+            lr[i]
+        }
+    };
+
     while layer.len() > 1 {
-        let layer_ref = &layer; // Create reference for closure
-        let indices: Vec<usize> = (0..layer_ref.len()).step_by(2).collect();
-        let next: Vec<[u8; 32]> = indices
-            .into_par_iter()
-            .map(|i| {
-                if i + 1 < layer_ref.len() {
-                    // Pair exists: hash pair[i] and pair[i+1]
-                    let mut hasher = Keccak256::new();
-                    hasher.update(&layer_ref[i]);
-                    hasher.update(&layer_ref[i + 1]);
-                    hasher.finalize().into()
-                } else {
-                    // Odd element: copy as-is
-                    layer_ref[i]
-                }
-            })
-            .collect();
+        let indices: Vec<usize> = (0..layer.len()).step_by(2).collect();
+        let next: Vec<[u8; 32]> = {
+            #[cfg(not(target_arch = "wasm32"))]
+            { indices.into_par_iter().map(|i| combine(i, &layer)).collect() }
+            #[cfg(target_arch = "wasm32")]
+            { indices.into_iter().map(|i| combine(i, &layer)).collect() }
+        };
         layer = next;
     }
 

@@ -643,6 +643,46 @@ export function compute_precontract_values_v2(file, key) {
 }
 
 /**
+ * JavaScript-compatible wrapper for sha256_compress
+ *
+ * # Arguments
+ * * `data` - Vector of Uint8Arrays containing the input data
+ *
+ * # Returns
+ * A byte vector containing the compressed result
+ * @param {Uint8Array[]} data
+ * @returns {Uint8Array}
+ */
+export function sha256_compress_js(data) {
+    const ptr0 = passArrayJsValueToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.sha256_compress_js(ptr0, len0);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * JavaScript-compatible wrapper for sha256_compress_final
+ *
+ * # Arguments
+ * * `data` - Vector of Uint8Arrays containing the input data
+ *
+ * # Returns
+ * A byte vector containing the final hash
+ * @param {Uint8Array[]} data
+ * @returns {Uint8Array}
+ */
+export function sha256_compress_final_js(data) {
+    const ptr0 = passArrayJsValueToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.sha256_compress_final_js(ptr0, len0);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
  * @param {string} hex_str
  * @returns {Uint8Array}
  */
@@ -736,46 +776,6 @@ export function commit(data) {
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.commit(ptr0, len0);
     return Commitment.__wrap(ret);
-}
-
-/**
- * JavaScript-compatible wrapper for sha256_compress
- *
- * # Arguments
- * * `data` - Vector of Uint8Arrays containing the input data
- *
- * # Returns
- * A byte vector containing the compressed result
- * @param {Uint8Array[]} data
- * @returns {Uint8Array}
- */
-export function sha256_compress_js(data) {
-    const ptr0 = passArrayJsValueToWasm0(data, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.sha256_compress_js(ptr0, len0);
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * JavaScript-compatible wrapper for sha256_compress_final
- *
- * # Arguments
- * * `data` - Vector of Uint8Arrays containing the input data
- *
- * # Returns
- * A byte vector containing the final hash
- * @param {Uint8Array[]} data
- * @returns {Uint8Array}
- */
-export function sha256_compress_final_js(data) {
-    const ptr0 = passArrayJsValueToWasm0(data, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.sha256_compress_final_js(ptr0, len0);
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
 }
 
 /**

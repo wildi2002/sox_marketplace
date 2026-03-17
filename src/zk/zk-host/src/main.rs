@@ -16,6 +16,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Analyze an image: compute thumbnail_hash and BRISQUE without generating a proof (fast)
+    Analyze {
+        /// Path to the image file (JPEG or PNG)
+        #[arg(short, long)]
+        image: String,
+    },
     /// Generate a ZK proof for an image
     Generate {
         /// Path to the image file (JPEG or PNG)
@@ -33,9 +39,27 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Analyze { image } => cmd_analyze(&image),
         Commands::Generate { image } => cmd_generate(&image),
         Commands::Verify { json } => cmd_verify(&json),
     }
+}
+
+fn cmd_analyze(image_path: &str) {
+    let image_bytes = std::fs::read(image_path)
+        .unwrap_or_else(|e| panic!("Failed to read image {image_path}: {e}"));
+
+    let thumbnail_hash = zk_common::thumbnail::thumbnail_hash(&image_bytes)
+        .unwrap_or_else(|e| panic!("thumbnail_hash failed: {e}"));
+
+    let brisque = zk_common::brisque::compute_brisque(&image_bytes)
+        .unwrap_or_else(|e| panic!("brisque failed: {e}"));
+
+    let output = serde_json::json!({
+        "thumbnail_hash": hex::encode(thumbnail_hash),
+        "brisque": brisque,
+    });
+    println!("{}", serde_json::to_string(&output).unwrap());
 }
 
 fn cmd_generate(image_path: &str) {

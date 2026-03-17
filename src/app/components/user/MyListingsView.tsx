@@ -20,11 +20,6 @@ type Listing = {
     preview_image?: string | null;
     preview_hash?: string | null;
     brisque_value?: number | null;
-    zk_proof?: string | null;
-    zk_proof_full?: string | null;
-    zk_h_ct?: string | null;
-    zk_c_k?: string | null;
-    zk_thumbnail_hash?: string | null;
 };
 
 type PurchaseRequest = {
@@ -221,11 +216,6 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                     listingPreviewHash={fulfillTarget.listing.preview_hash}
                     listingBrisqueValue={fulfillTarget.listing.brisque_value}
                     listingPreviewImage={fulfillTarget.listing.preview_image}
-                    listingZkProof={fulfillTarget.listing.zk_proof}
-                    listingZkProofFull={fulfillTarget.listing.zk_proof_full}
-                    listingZkHCt={fulfillTarget.listing.zk_h_ct}
-                    listingZkCK={fulfillTarget.listing.zk_c_k}
-                    listingZkThumbnailHash={fulfillTarget.listing.zk_thumbnail_hash}
                     onClose={() => {
                         setFulfillTarget(null);
                         if (expandedId !== null) fetchRequests(expandedId);

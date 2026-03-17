@@ -4,21 +4,25 @@ import { NextResponse } from "next/server";
 export async function GET() {
     try {
         const stmt = db.prepare(
-            `SELECT 
-                disputes.contract_id, 
-                contracts.tip_dispute, 
-                disputes.pk_buyer_sponsor, 
-                disputes.pk_vendor_sponsor, 
+            `SELECT
+                disputes.contract_id,
+                contracts.tip_dispute,
+                disputes.pk_buyer_sponsor,
+                disputes.pk_vendor_sponsor,
                 disputes.dispute_smart_contract,
                 contracts.optimistic_smart_contract,
                 contracts.pk_buyer,
                 contracts.pk_vendor,
                 contracts.num_blocks,
-                contracts.num_gates
-            FROM disputes 
-            JOIN contracts 
+                contracts.num_gates,
+                contracts.opening_value,
+                contracts.item_description
+            FROM disputes
+            JOIN contracts
             ON disputes.contract_id = contracts.id
-            WHERE disputes.pk_buyer_sponsor IS NULL OR disputes.pk_vendor_sponsor IS NULL;`
+            WHERE disputes.pk_buyer_sponsor IS NULL
+               OR disputes.pk_vendor_sponsor IS NULL
+               OR disputes.dispute_smart_contract IS NOT NULL;`
         );
         const contracts = stmt.all();
 

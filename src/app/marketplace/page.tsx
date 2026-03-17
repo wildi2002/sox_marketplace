@@ -20,11 +20,6 @@ type Listing = {
     listing_type?: string;
     preview_image?: string;
     brisque_value?: number | null;
-    zk_proof?: string | null;
-    zk_proof_full?: string | null;
-    zk_h_ct?: string | null;
-    zk_c_k?: string | null;
-    zk_thumbnail_hash?: string | null;
     preview_hash?: string | null;
 };
 
@@ -51,7 +46,6 @@ export default function MarketplacePage() {
     const [listings, setListings] = useState<Listing[]>([]);
     const [requesting, setRequesting] = useState<number | null>(null);
     const [search, setSearch] = useState("");
-    const [verifying, setVerifying] = useState<number | null>(null);
 
     const fetchListings = async () => {
         const res = await fetch("/api/listings");
@@ -88,36 +82,6 @@ export default function MarketplacePage() {
             showToast(`Error: ${e.message}`, "error");
         } finally {
             setRequesting(null);
-        }
-    };
-
-    const handleVerifyZk = async (listing: Listing) => {
-        if (!listing.zk_proof) return;
-        setVerifying(listing.id);
-        try {
-            const res = await fetch("/api/zk/verify", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    proof: listing.zk_proof,
-                    proof_full: listing.zk_proof_full ?? null,
-                    h_ct: listing.zk_h_ct,
-                    preview_hash: listing.preview_hash,
-                    brisque: listing.brisque_value ?? null,
-                    c_k: listing.zk_c_k,
-                    thumbnail_hash: listing.zk_thumbnail_hash ?? null,
-                }),
-            });
-            const data = await res.json();
-            if (data.valid) {
-                showToast("ZK proof verified successfully.", "success");
-            } else {
-                showToast(`ZK proof invalid: ${data.reason || "unknown reason"}`, "error");
-            }
-        } catch (e: any) {
-            showToast(`ZK verification error: ${e.message}`, "error");
-        } finally {
-            setVerifying(null);
         }
     };
 
@@ -180,23 +144,7 @@ export default function MarketplacePage() {
                                     <h2 className="text-lg font-semibold">{listing.title}</h2>
                                     <div className="flex gap-1 shrink-0">
                                         {listing.listing_type === "image" && (
-                                            <>
-                                                <BrisqueBadge value={listing.brisque_value} />
-                                                {listing.zk_proof ? (
-                                                    <button
-                                                        onClick={() => handleVerifyZk(listing)}
-                                                        disabled={verifying === listing.id}
-                                                        className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-medium hover:bg-blue-200 transition-colors disabled:opacity-50"
-                                                        title="Click to verify ZK proof"
-                                                    >
-                                                        {verifying === listing.id ? "Verifying…" : "ZK ✓"}
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">
-                                                        ZK —
-                                                    </span>
-                                                )}
-                                            </>
+                                            <BrisqueBadge value={listing.brisque_value} />
                                         )}
                                     </div>
                                 </div>

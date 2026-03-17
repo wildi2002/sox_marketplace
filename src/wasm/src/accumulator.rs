@@ -3,6 +3,7 @@ use crate::{split_ct_blocks, CompiledCircuit};
 use crate::circuits_v2::{CompiledCircuitV2, acc_circuit_v2};
 use sha3::{Digest, Keccak256};
 use js_sys::{Array, Uint8Array};
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -275,18 +276,19 @@ fn compute_merkle_root(hashes: Vec<Vec<u8>>) -> Vec<u8> {
 // FIXME could introduce issues when using it as proofs. E.g [1,2,3,4] and [1,2,h(3)||h(4)] lead to
 // the same root !!
 fn compute_next_layer(curr_layer: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
-    (0..curr_layer.len())
-        .step_by(2)
-        .collect::<Vec<_>>()
-        .par_iter()
-        .map(|&i| {
-            if i < curr_layer.len() - 1 {
-                concat_and_hash(&curr_layer[i], &curr_layer[i + 1])
-            } else {
-                curr_layer[i].clone()
-            }
-        })
-        .collect()
+    let indices: Vec<_> = (0..curr_layer.len()).step_by(2).collect();
+    #[cfg(not(target_arch = "wasm32"))]
+    let iter = indices.par_iter();
+    #[cfg(target_arch = "wasm32")]
+    let iter = indices.iter();
+    iter.map(|&i| {
+        if i < curr_layer.len() - 1 {
+            concat_and_hash(&curr_layer[i], &curr_layer[i + 1])
+        } else {
+            curr_layer[i].clone()
+        }
+    })
+    .collect()
 }
 
 // Returns the index of the neighbor node
@@ -341,29 +343,30 @@ pub fn acc_fixed64(values: &[Vec<u8>]) -> Vec<u8> {
         return hash_block64(&values[0]).to_vec();
     }
 
-    // Parallel hash of all leaves
+    #[cfg(not(target_arch = "wasm32"))]
     let mut layer: Vec<[u8; 32]> = values.par_iter().map(|v| hash_block64(v)).collect();
+    #[cfg(target_arch = "wasm32")]
+    let mut layer: Vec<[u8; 32]> = values.iter().map(|v| hash_block64(v)).collect();
 
-    // Parallel computation of each layer
-    // CRITICAL: Use indexed parallel iteration to preserve order deterministically
+    let combine = |i: usize, lr: &Vec<[u8; 32]>| -> [u8; 32] {
+        if i + 1 < lr.len() {
+            let mut hasher = Keccak256::new();
+            hasher.update(&lr[i]);
+            hasher.update(&lr[i + 1]);
+            hasher.finalize().into()
+        } else {
+            lr[i]
+        }
+    };
+
     while layer.len() > 1 {
-        let layer_ref = &layer; // Create reference for closure
-        let indices: Vec<usize> = (0..layer_ref.len()).step_by(2).collect();
-        let next: Vec<[u8; 32]> = indices
-            .into_par_iter()
-            .map(|i| {
-                if i + 1 < layer_ref.len() {
-                    // Pair exists: hash pair[i] and pair[i+1]
-                    let mut hasher = Keccak256::new();
-                    hasher.update(&layer_ref[i]);
-                    hasher.update(&layer_ref[i + 1]);
-                    hasher.finalize().into()
-                } else {
-                    // Odd element: copy as-is
-                    layer_ref[i]
-                }
-            })
-            .collect();
+        let indices: Vec<usize> = (0..layer.len()).step_by(2).collect();
+        let next: Vec<[u8; 32]> = {
+            #[cfg(not(target_arch = "wasm32"))]
+            { indices.into_par_iter().map(|i| combine(i, &layer)).collect() }
+            #[cfg(target_arch = "wasm32")]
+            { indices.into_iter().map(|i| combine(i, &layer)).collect() }
+        };
         layer = next;
     }
 

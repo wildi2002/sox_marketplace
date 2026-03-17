@@ -59,80 +59,19 @@ async function computeBrisqueFallback(
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        // Two modes:
-        // 1. Full ZK: { image_file_hex } — original JPEG/PNG bytes, uses zk-host binary
-        // 2. BRISQUE fallback: { image_hex, width, height } — RGBA bytes from canvas
-        const { image_file_hex, image_hex, width, height } = body;
+        // Only accepts thumbnail RGBA bytes (small, public data — NOT the original image).
+        // Full ZK proof generation must happen locally at the vendor's machine (Electron).
+        const { image_hex, width, height } = body;
 
-        const tmpDir = ensureTmpDir();
-
-        // Mode 1: Full ZK proof via zk-host binary
-        if (image_file_hex && fs.existsSync(ZK_HOST_PATH)) {
-            const imgBytes = Buffer.from(
-                image_file_hex.startsWith("0x") ? image_file_hex.slice(2) : image_file_hex,
-                "hex"
+        if (!image_hex || !width || !height) {
+            return NextResponse.json(
+                { error: "Missing image_hex, width, or height" },
+                { status: 400 }
             );
-            // Detect format from magic bytes to choose extension
-            const ext = imgBytes[0] === 0xff && imgBytes[1] === 0xd8 ? ".jpg" : ".png";
-            const tmpImg = path.join(tmpDir, `zk_img_${Date.now()}${ext}`);
-            fs.writeFileSync(tmpImg, imgBytes);
-            try {
-                const env = { ...process.env, SP1_PROVER: process.env.SP1_PROVER ?? "cpu" };
-                const { stdout } = await execFileAsync(
-                    ZK_HOST_PATH,
-                    ["generate", "--image", tmpImg],
-                    { timeout: 1800000, env } // 30 min timeout for proof generation
-                );
-                const result = JSON.parse(stdout.trim());
-                return NextResponse.json(result);
-            } catch (zkErr: any) {
-                // zk-host crashed or panicked — fall through to BRISQUE-only fallback
-                console.error("zk-host generate failed, falling back to BRISQUE:", zkErr.message);
-            } finally {
-                if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg);
-            }
         }
 
-        // Mode 2: BRISQUE-only fallback (no zk-host or no image_file_hex)
-        let brisque: number | null = null;
-        if (image_hex && width && height) {
-            brisque = await computeBrisqueFallback(image_hex, width, height);
-        } else if (image_file_hex) {
-            // zk-host not available but we have the file — compute BRISQUE via Python on image file
-            const imgBytes = Buffer.from(
-                image_file_hex.startsWith("0x") ? image_file_hex.slice(2) : image_file_hex,
-                "hex"
-            );
-            const ext = imgBytes[0] === 0xff && imgBytes[1] === 0xd8 ? ".jpg" : ".png";
-            const tmpImg = path.join(tmpDir, `brisque_img_${Date.now()}${ext}`);
-            fs.writeFileSync(tmpImg, imgBytes);
-            try {
-                // Use Python with image file directly
-                const { stdout } = await execFileAsync(
-                    PYTHON3,
-                    ["-c", `
-import sys, json
-import numpy as np
-from brisque import BRISQUE
-import skimage.io
-img = skimage.io.imread('${tmpImg}')
-if len(img.shape) == 3 and img.shape[2] == 4: img = img[:,:,:3]
-bq = BRISQUE()
-score = float(bq.score(img))
-print(json.dumps({'brisque': score}))
-`],
-                    { timeout: 60000 }
-                );
-                const r = JSON.parse(stdout.trim());
-                brisque = r.brisque ?? null;
-            } catch (e: any) {
-                console.error("BRISQUE from file failed:", e.message);
-            } finally {
-                if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg);
-            }
-        }
-
-        return NextResponse.json({ available: false, brisque, proof: null, h_ct: null, c_k: null });
+        const brisque = await computeBrisqueFallback(image_hex, width, height);
+        return NextResponse.json({ brisque });
     } catch (error: any) {
         console.error("Error in POST /api/zk/generate:", error);
         return NextResponse.json({ error: error.message }, { status: 500 });

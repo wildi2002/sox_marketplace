@@ -32,6 +32,7 @@ export type Contract = {
     zk_h_ct?: string | null;
     zk_c_k?: string | null;
     zk_thumbnail_hash?: string | null;
+    zk_brisque?: number | null;
 };
 
 interface NonAcceptedPrecontractsListViewProps {

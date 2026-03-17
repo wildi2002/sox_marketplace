@@ -274,5 +274,12 @@ try {
         console.warn("Warning adding zk_thumbnail_hash to contracts:", e.message);
     }
 }
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_brisque REAL");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_brisque to contracts:", e.message);
+    }
+}
 
 export default db;
