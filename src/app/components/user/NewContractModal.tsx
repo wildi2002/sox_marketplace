@@ -243,7 +243,7 @@ export default function NewContractModal({
                         // Fresh per-precontract ZK proof (generated locally in Electron)
                         zk_proof: zkData?.proof ?? null,
                         zk_proof_full: zkData?.proof_full ?? null,
-                        zk_h_ct: zkData?.h_ct ?? null,
+                        zk_h_ct: zkData?.h_pt ?? null,
                         zk_c_k: zkData?.c_k ?? null,
                         zk_thumbnail_hash: zkData?.thumbnail_hash ?? null,
                         zk_brisque: zkData?.brisque ?? null,

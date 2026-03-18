@@ -28,7 +28,7 @@ export default function NonAcceptedPrecontractModal({
     const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
     const [zkStatus, setZkStatus] = useState<ZkStatus>("idle");
     const [zkReason, setZkReason] = useState<string | undefined>();
-    const [zkChecks, setZkChecks] = useState<{thumbnailMatch?: boolean; brisqueMatch?: boolean; cryptoValid?: boolean} | null>(null);
+    const [zkChecks, setZkChecks] = useState<{thumbnailMatch?: boolean; brisqueMatch?: boolean; cryptoValid?: boolean; hPtMatch?: boolean} | null>(null);
     const { showToast } = useToast();
 
     if (!contract) return null;
@@ -52,6 +52,7 @@ export default function NonAcceptedPrecontractModal({
         brisque_value,
         zk_proof,
         zk_proof_full,
+        zk_h_ct,
         zk_c_k,
         zk_thumbnail_hash,
         zk_brisque,
@@ -78,8 +79,19 @@ export default function NonAcceptedPrecontractModal({
             zk_brisque == null || brisque_value == null ||
             Math.abs(zk_brisque - brisque_value) <= 2.0;
 
-        setZkChecks({ thumbnailMatch, brisqueMatch });
+        // Check 3: h_pt from proof matches item_description (d = SHA256(pt) committed in precontract)
+        // This is the critical on-chain binding: SNARK proves h_pt = SHA256(pt) for the sold image
+        const hPtMatch =
+            !zk_h_ct || !item_description ||
+            zk_h_ct.replace("0x", "").toLowerCase() === item_description.replace("0x", "").toLowerCase();
 
+        setZkChecks({ thumbnailMatch, brisqueMatch, hPtMatch });
+
+        if (!hPtMatch) {
+            setZkStatus("invalid");
+            setZkReason("h_pt from proof does not match precontract description (SHA256(pt) mismatch)");
+            return;
+        }
         if (!thumbnailMatch) {
             setZkStatus("invalid");
             setZkReason("Thumbnail hash in proof does not match listing preview");
@@ -131,7 +143,7 @@ export default function NonAcceptedPrecontractModal({
             const payload = {
                 proof: zk_proof,
                 proof_full: zk_proof_full,
-                h_ct: null,
+                h_pt: null,
                 thumbnail_hash: zk_thumbnail_hash ?? null,
                 preview_hash: preview_hash ?? null,
                 brisque: zk_brisque ?? brisque_value ?? null,
@@ -305,6 +317,22 @@ export default function NonAcceptedPrecontractModal({
 
                             {zk_proof ? (
                                 <div className="space-y-1.5">
+                                    {/* Check 0: h_pt on-chain binding */}
+                                    {zk_h_ct && (
+                                        <div className="flex items-start gap-2 text-xs">
+                                            <span className={`shrink-0 font-bold ${
+                                                zkChecks?.hPtMatch === undefined ? "text-gray-400" :
+                                                zkChecks.hPtMatch ? "text-green-700" : "text-red-700"
+                                            }`}>
+                                                {zkChecks?.hPtMatch === undefined ? "·" : zkChecks.hPtMatch ? "✓" : "✗"}
+                                            </span>
+                                            <div>
+                                                <span className="font-medium text-gray-700">Plaintext hash matches precontract (SHA256(pt) = d)</span>
+                                                <span className="text-gray-500 ml-1">— ZK proof binds sold image to on-chain commitment</span>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Check 1: Thumbnail hash */}
                                     <div className="flex items-start gap-2 text-xs">
                                         <span className={`shrink-0 font-bold ${

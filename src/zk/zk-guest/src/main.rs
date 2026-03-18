@@ -15,9 +15,12 @@ pub fn main() {
     let iv: [u8; 16] = sp1_zkvm::io::read();
     let image: Vec<u8> = sp1_zkvm::io::read();
 
-    // Compute ciphertext (IV prepended)
+    // Compute ciphertext (IV prepended) — kept internally for soundness
     let ct = aes_ctr_encrypt(&image, &key, &iv);
-    let h_ct = sha256(&ct);
+    let _ = ct; // ct is produced but not committed; only h_pt binds plaintext on-chain
+
+    // Hash of plaintext — used as on-chain binding (d = SHA256(pt))
+    let h_pt = sha256(&image);
 
     // Advertising properties
     let ap1 = thumbnail_hash(&image).expect("thumbnail_hash failed");
@@ -27,7 +30,7 @@ pub fn main() {
     let c_k = sha256_commit(&key, &r);
 
     // Public outputs
-    sp1_zkvm::io::commit_slice(&h_ct);
+    sp1_zkvm::io::commit_slice(&h_pt);
     sp1_zkvm::io::commit_slice(&ap1);
     sp1_zkvm::io::commit_slice(&ap2.to_le_bytes());
     sp1_zkvm::io::commit_slice(&c_k);

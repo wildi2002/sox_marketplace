@@ -35,7 +35,7 @@ function verifyHashCommitment(
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { proof, proof_full, preview_hash, brisque, c_k, h_ct, thumbnail_hash } = body;
+        const { proof, proof_full, preview_hash, brisque, c_k, h_pt, thumbnail_hash } = body;
 
         if (!proof || !c_k || brisque == null) {
             return NextResponse.json(
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
             if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
             const tmpJson = path.join(tmpDir, `zk_verify_${Date.now()}.json`);
             try {
-                const payload = { proof, proof_full, h_ct: h_ct ?? null, thumbnail_hash: thumbnail_hash ?? null, brisque, c_k };
+                const payload = { proof, proof_full, h_pt: h_pt ?? null, thumbnail_hash: thumbnail_hash ?? null, brisque, c_k };
                 fs.writeFileSync(tmpJson, JSON.stringify(payload));
                 const env = { ...process.env, SP1_PROVER: process.env.SP1_PROVER ?? "cpu" };
                 const { stdout } = await execFileAsync(
