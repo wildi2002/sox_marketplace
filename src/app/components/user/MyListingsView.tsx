@@ -20,6 +20,17 @@ type Listing = {
     preview_image?: string | null;
     preview_hash?: string | null;
     brisque_value?: number | null;
+    created_at?: string | null;
+    zk_proof?: string | null;
+    zk_proof_full?: string | null;
+    zk_h_pt?: string | null;
+    zk_thumbnail_hash?: string | null;
+    zk_brisque?: number | null;
+    zk_vk_hash?: string | null;
+    ext_img_thumb_hash?: string | null;
+    ext_img_width?: number | null;
+    ext_img_height?: number | null;
+    ext_img_size?: number | null;
 };
 
 type PurchaseRequest = {
@@ -48,7 +59,8 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
     const [fulfillTarget, setFulfillTarget] = useState<FulfillTarget | null>(null);
 
     const fetchListings = async () => {
-        const res = await fetch("/api/listings");
+        // include_pending=1 so vendor sees ZK listings still generating their proof
+        const res = await fetch("/api/listings?include_pending=1");
         const data = await res.json();
         setListings(
             (data as Listing[]).filter(
@@ -91,7 +103,12 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
         const handler = () => fetchListings();
         handler();
         window.addEventListener("reloadData", handler);
-        return () => window.removeEventListener("reloadData", handler);
+        // Poll every 30s so ZK-pending listings update automatically when proof finishes
+        const interval = setInterval(handler, 30_000);
+        return () => {
+            window.removeEventListener("reloadData", handler);
+            clearInterval(interval);
+        };
     }, [publicKey]);
 
     return (
@@ -109,6 +126,19 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                             <div className="flex-1 min-w-0">
                                 <span className="font-medium">{listing.title}</span>
                                 <span className="ml-3 text-sm text-gray-600">{listing.price} ETH<ChfNote value={listing.price} /></span>
+                                {listing.algorithm_suite === "zk" ? (
+                                    listing.zk_proof ? (
+                                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1) ✓</span>
+                                    ) : (
+                                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-medium">
+                                            ZK Proof: Generating…{listing.created_at ? ` (${Math.round((Date.now() - new Date(listing.created_at).getTime()) / 60000)} min)` : ""}
+                                        </span>
+                                    )
+                                ) : listing.listing_type === "image" && listing.algorithm_suite === "extended_image" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc (BMP)</span>
+                                ) : listing.listing_type === "image" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">Hash Commitment</span>
+                                ) : null}
                                 {listing.pending_requests > 0 && (
                                     <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
                                         {listing.pending_requests} pending
@@ -216,6 +246,17 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                     listingPreviewHash={fulfillTarget.listing.preview_hash}
                     listingBrisqueValue={fulfillTarget.listing.brisque_value}
                     listingPreviewImage={fulfillTarget.listing.preview_image}
+                    listingAlgorithmSuite={fulfillTarget.listing.algorithm_suite}
+                    listingZkProof={fulfillTarget.listing.zk_proof}
+                    listingZkProofFull={fulfillTarget.listing.zk_proof_full}
+                    listingZkHPt={fulfillTarget.listing.zk_h_pt}
+                    listingZkThumbnailHash={fulfillTarget.listing.zk_thumbnail_hash}
+                    listingZkBrisque={fulfillTarget.listing.zk_brisque}
+                    listingZkVkHash={fulfillTarget.listing.zk_vk_hash}
+                    listingExtImgThumbHash={fulfillTarget.listing.ext_img_thumb_hash}
+                    listingExtImgWidth={fulfillTarget.listing.ext_img_width}
+                    listingExtImgHeight={fulfillTarget.listing.ext_img_height}
+                    listingExtImgSize={fulfillTarget.listing.ext_img_size}
                     onClose={() => {
                         setFulfillTarget(null);
                         if (expandedId !== null) fetchRequests(expandedId);

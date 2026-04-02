@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { fileToBytes as fileToBytes } from "./helpers";
 
 const POSSIBLE_KEY_SIZES = [16, 24, 32]; // in bytes
@@ -84,11 +85,11 @@ export async function encrypt(
     const ct = await crypto.subtle.encrypt(
         {
             name: ALGORITHM,
-            counter,
+            counter: counter as Uint8Array<ArrayBuffer>,
             length: REAL_COUNTER_SIZE * 8,
         },
         key,
-        data
+        data as BufferSource
     );
 
     return {

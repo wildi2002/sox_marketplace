@@ -27,6 +27,7 @@ type Dispute = {
     pk_vendor?: string;
     num_blocks?: number;
     num_gates?: number;
+    algorithm_suite?: string;
 };
 
 export default function DisputeListView() {
@@ -344,7 +345,7 @@ export default function DisputeListView() {
                     <div className="flex gap-8 justify-between items-center">
                         <Button
                             label="Download argument"
-                            onClick={handleClickDownloadArgument}
+                            onClick={() => selectedDispute && handleClickDownloadArgument(selectedDispute)}
                             width="full"
                         />
                     </div>
@@ -376,8 +377,12 @@ export default function DisputeListView() {
                     publicKey={user?.publicKey || selectedDispute.pk_buyer_sponsor || selectedDispute.pk_vendor_sponsor || ""}
                     pkBuyer={selectedDispute.pk_buyer}
                     pkVendor={selectedDispute.pk_vendor}
+                    pkBuyerSponsor={selectedDispute.pk_buyer_sponsor}
+                    pkVendorSponsor={selectedDispute.pk_vendor_sponsor}
                     numBlocks={selectedDispute.num_blocks}
                     numGates={selectedDispute.num_gates}
+                    contractId={selectedDispute.contract_id}
+                    algorithmSuite={selectedDispute.algorithm_suite}
                 />
             )}
         </div>

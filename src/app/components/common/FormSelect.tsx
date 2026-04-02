@@ -6,6 +6,8 @@ interface FormSelectProps {
     value: string;
     onChange: (value: string) => void;
     options: string[];
+    optionLabels?: Record<string, string>;
+    disabledOptions?: string[];
     disabled?: boolean;
 }
 
@@ -15,6 +17,8 @@ export default function FormSelect({
     value,
     onChange,
     options,
+    optionLabels,
+    disabledOptions,
     disabled = false,
 }: FormSelectProps) {
     return (
@@ -33,8 +37,8 @@ export default function FormSelect({
                 }`}
             >
                 {options.map((opt) => (
-                    <option key={opt} value={opt}>
-                        {opt}
+                    <option key={opt} value={opt} disabled={disabledOptions?.includes(opt)}>
+                        {optionLabels?.[opt] ?? opt}
                     </option>
                 ))}
             </select>

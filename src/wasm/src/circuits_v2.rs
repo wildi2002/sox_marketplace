@@ -13,6 +13,16 @@ pub const OPCODE_SHA2: u8 = 0x02;
 pub const OPCODE_CONST: u8 = 0x03;
 pub const OPCODE_XOR: u8 = 0x04;
 pub const OPCODE_COMP: u8 = 0x05;
+/// Extended opcodes for the extended image description circuit.
+/// CMPOFF: compare fixed bytes at a given offset in a 64B AES block against expected bytes.
+///   sons: [block]  params: offset(2B BE) || length(1B) || expected_bytes(length B)
+pub const OPCODE_CMPOFF: u8 = 0x06;
+/// CMPBLOCK: compare bytes at offset_a in block_a against bytes at offset_b in block_b.
+///   sons: [block_a, block_b]  params: off_a(2B BE) || off_b(2B BE) || length(1B)
+pub const OPCODE_CMPBLOCK: u8 = 0x07;
+/// AND: bitwise AND of the first byte of two boolean gate outputs.
+///   sons: [a, b]  params: (none)
+pub const OPCODE_AND: u8 = 0x08;
 
 /// Function type for V2 instructions.
 /// Takes sons (input values), params (gate-specific parameters), and aes_key (for AES-CTR gates).
@@ -22,11 +32,14 @@ type InstructionV2 = fn(sons: &[Vec<u8>], params: &[u8], aes_key: &[u8]) -> Vec<
 /// This function provides a list of instruction functions indexed by opcode.
 fn version_instructions_v2() -> Vec<InstructionV2> {
     vec![
-        instruction_aes_ctr,  // opcode 0x01
-        instruction_sha2,     // opcode 0x02
-        instruction_const,    // opcode 0x03
-        instruction_xor,      // opcode 0x04
-        instruction_comp,     // opcode 0x05
+        instruction_aes_ctr,   // opcode 0x01
+        instruction_sha2,      // opcode 0x02
+        instruction_const,     // opcode 0x03
+        instruction_xor,       // opcode 0x04
+        instruction_comp,      // opcode 0x05
+        instruction_cmpoff,    // opcode 0x06
+        instruction_cmpblock,  // opcode 0x07
+        instruction_and,       // opcode 0x08
     ]
 }
 
@@ -53,6 +66,21 @@ fn instruction_xor(sons: &[Vec<u8>], _params: &[u8], _aes_key: &[u8]) -> Vec<u8>
 /// Instruction wrapper for COMP opcode.
 fn instruction_comp(sons: &[Vec<u8>], _params: &[u8], _aes_key: &[u8]) -> Vec<u8> {
     eval_comp(sons)
+}
+
+/// Instruction wrapper for CMPOFF opcode.
+fn instruction_cmpoff(sons: &[Vec<u8>], params: &[u8], _aes_key: &[u8]) -> Vec<u8> {
+    eval_cmpoff(sons, params)
+}
+
+/// Instruction wrapper for CMPBLOCK opcode.
+fn instruction_cmpblock(sons: &[Vec<u8>], params: &[u8], _aes_key: &[u8]) -> Vec<u8> {
+    eval_cmpblock(sons, params)
+}
+
+/// Instruction wrapper for AND opcode.
+fn instruction_and(sons: &[Vec<u8>], _params: &[u8], _aes_key: &[u8]) -> Vec<u8> {
+    eval_and(sons)
 }
 
 /// A gate encoded with the new 64-byte format.
@@ -634,6 +662,60 @@ pub(crate) fn normalize_64(mut v: Vec<u8>) -> Vec<u8> {
     }
 }
 
+/// CMPOFF: compare `length` bytes of `block` at `offset` against expected bytes in params.
+/// Output: 64B vector with byte 0 = 1 (equal) or 0 (not equal).
+fn eval_cmpoff(sons: &[Vec<u8>], params: &[u8]) -> Vec<u8> {
+    if sons.len() != 1 {
+        die("CMPOFF gate expects arity 1");
+    }
+    if params.len() < 3 {
+        die("CMPOFF gate expects offset(2B) + length(1B) + expected_bytes in params");
+    }
+    let offset = u16::from_be_bytes([params[0], params[1]]) as usize;
+    let length = params[2] as usize;
+    if params.len() < 3 + length {
+        die("CMPOFF gate: params too short for expected bytes");
+    }
+    let expected = &params[3..3 + length];
+    let block = normalize_64(sons[0].clone());
+    let eq = offset + length <= 64 && block[offset..offset + length] == *expected;
+    let mut out = vec![0u8; 64];
+    out[0] = if eq { 1 } else { 0 };
+    out
+}
+
+/// CMPBLOCK: compare `length` bytes of block_a at off_a against block_b at off_b.
+/// Output: 64B vector with byte 0 = 1 (equal) or 0 (not equal).
+fn eval_cmpblock(sons: &[Vec<u8>], params: &[u8]) -> Vec<u8> {
+    if sons.len() != 2 {
+        die("CMPBLOCK gate expects arity 2");
+    }
+    if params.len() < 5 {
+        die("CMPBLOCK gate expects off_a(2B) + off_b(2B) + length(1B) in params");
+    }
+    let off_a = u16::from_be_bytes([params[0], params[1]]) as usize;
+    let off_b = u16::from_be_bytes([params[2], params[3]]) as usize;
+    let length = params[4] as usize;
+    let block_a = normalize_64(sons[0].clone());
+    let block_b = normalize_64(sons[1].clone());
+    let eq = off_a + length <= 64 && off_b + length <= 64
+        && block_a[off_a..off_a + length] == block_b[off_b..off_b + length];
+    let mut out = vec![0u8; 64];
+    out[0] = if eq { 1 } else { 0 };
+    out
+}
+
+/// AND: logical AND of two boolean gate outputs (checks byte 0 of each).
+/// Output: 64B vector with byte 0 = 1 iff both inputs have byte 0 = 1.
+fn eval_and(sons: &[Vec<u8>]) -> Vec<u8> {
+    if sons.len() != 2 {
+        die("AND gate expects arity 2");
+    }
+    let mut out = vec![0u8; 64];
+    out[0] = sons[0].first().copied().unwrap_or(0) & sons[1].first().copied().unwrap_or(0);
+    out
+}
+
 fn xor64(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> {
     // Return the maximum size of both inputs, XOR only up to the minimum size
     // This is more flexible like V1, but in practice XOR inputs in V2 are always 64 bytes
@@ -654,6 +736,236 @@ fn xor64(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> {
     }
     
     out
+}
+
+/// Description tuple for the extended image circuit.
+///
+/// The marketplace mandates a BMP container layout:
+///   bytes   0– 63 : header block  (format 1B | size 4B | width 4B | height 4B | reserved 51B)
+///   bytes  64–3135: 32×32 raw-RGB thumbnail (48 × 64B blocks)
+///   bytes 3136+   : BMP pixel data
+///
+/// All fields are stored big-endian in the header so they lie at fixed offsets within
+/// the first AES block and can be verified by CMPOFF gates.
+pub struct ExtendedImageDesc {
+    pub d_sha: [u8; 32],   // SHA256(x)
+    pub d_thumb: [u8; 32], // SHA256(thumbnail bytes 64..3136)
+    pub d_width: u32,      // image width in pixels
+    pub d_height: u32,     // image height in pixels
+    pub d_format: u8,      // format tag (0 = BMP)
+    pub d_size: u32,       // file size in bytes
+}
+
+/// Compiles a V2 circuit for the extended image description.
+///
+/// The output gate is an AND chain whose final bit is 1 iff all of the following hold:
+///   1. SHA256(Dec_k(ct)) = d_sha
+///   2. SHA256(Dec_k(ct)[64..3136]) = d_thumb
+///   3. Header byte 0 = d_format
+///   4. Header bytes 1..5 = d_size (big-endian u32)
+///   5. Header bytes 5..9 = d_width (big-endian u32)
+///   6. Header bytes 9..13 = d_height (big-endian u32)
+///
+/// Circuit size: ≈ 2m + 70 gates, where m = ⌈|ct data| / 64⌉.
+pub fn compile_circuit_extended_image_v2(ct: &[u8], desc: &ExtendedImageDesc) -> CompiledCircuitV2 {
+    if ct.len() < 16 {
+        die("Ciphertext must include a 16-byte IV");
+    }
+    let iv = &ct[..16];
+    let data = &ct[16..];
+
+    let block_size = 64usize;
+    let pt_len = data.len();
+    let m = (pt_len + block_size - 1) / block_size;
+
+    if m < 49 {
+        die("Extended image requires at least 49 blocks (1 header + 48 thumbnail)");
+    }
+
+    let mut gates: Vec<GateV2> = Vec::new();
+    // block_outputs[i] = 0-indexed gate array position of the AES output for block i
+    let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
+
+    // ── Phase 1: AES-CTR decryption (m gates) ─────────────────────────────────
+    for i in 0..m {
+        let counter = increment_iv(iv, (i * (block_size / 16)) as u64);
+        let remaining_bits = usize::min(512, (pt_len.saturating_sub(i * block_size)) * 8);
+        let mut params = Vec::with_capacity(18);
+        params.extend_from_slice(&counter);
+        params.extend_from_slice(&(remaining_bits as u16).to_be_bytes());
+        gates.push(GateV2 {
+            opcode: OPCODE_AES_CTR,
+            sons: vec![-(i as i64 + 1)],
+            params,
+        });
+        block_outputs.push(gates.len() - 1);
+    }
+
+    // ── Phase 2: SHA256 of full plaintext ──────────────────────────────────────
+    let rem = pt_len % block_size;
+    let len_bits_full = (pt_len as u64) * 8;
+    let pad_extra_full = rem > block_size - 9;
+    let last_aes_gate_num = (*block_outputs.last().unwrap() + 1) as i64;
+
+    // Collect padded block list for full-file SHA
+    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
+
+    if rem == 0 {
+        // Need an extra block: [0x80, 0×55, length(8B)]
+        let mut extra = vec![0u8; 64];
+        extra[0] = 0x80;
+        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
+        let h = push_const2(&mut gates, &extra);
+        full_sha_blocks.push((h - 1) as usize);
+    } else {
+        let mut mask = vec![0u8; 64];
+        mask[rem] = 0x80;
+        if !pad_extra_full {
+            mask[56..].copy_from_slice(&len_bits_full.to_be_bytes());
+        }
+        let mask_gate = push_const2(&mut gates, &mask);
+        let padded = push_gate(&mut gates, GateV2 {
+            opcode: OPCODE_XOR,
+            sons: vec![last_aes_gate_num, mask_gate],
+            params: vec![],
+        });
+        *full_sha_blocks.last_mut().unwrap() = (padded - 1) as usize;
+
+        if pad_extra_full {
+            let mut extra = vec![0u8; 64];
+            extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
+            let h = push_const2(&mut gates, &extra);
+            full_sha_blocks.push((h - 1) as usize);
+        }
+    }
+
+    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
+    let desc_sha_gate = push_const1(&mut gates, &desc.d_sha);
+    let sha_comp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_COMP,
+        sons: vec![final_full_sha, desc_sha_gate],
+        params: vec![],
+    });
+
+    // ── Phase 3: SHA256 of thumbnail (blocks 1..=48, 3072 bytes) ──────────────
+    // rem = 3072 % 64 = 0 → extra padding block required
+    let thumb_len_bits: u64 = 3072u64 * 8;
+    let mut thumb_pad = vec![0u8; 64];
+    thumb_pad[0] = 0x80;
+    thumb_pad[56..].copy_from_slice(&thumb_len_bits.to_be_bytes());
+    let thumb_pad_gate = push_const2(&mut gates, &thumb_pad);
+
+    let mut thumb_sha_blocks: Vec<usize> = block_outputs[1..49].to_vec();
+    thumb_sha_blocks.push((thumb_pad_gate - 1) as usize);
+
+    let final_thumb_sha = sha_chain(&mut gates, &thumb_sha_blocks);
+    let desc_thumb_gate = push_const1(&mut gates, &desc.d_thumb);
+    let thumb_comp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_COMP,
+        sons: vec![final_thumb_sha, desc_thumb_gate],
+        params: vec![],
+    });
+
+    // ── Phase 4: CMPOFF gates on header block (block 0) ───────────────────────
+    let header_gate_num = (block_outputs[0] + 1) as i64;
+
+    // format: 1 byte at offset 0
+    let p_fmt = vec![0u8, 0u8, 1u8, desc.d_format];
+    let format_cmp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_CMPOFF,
+        sons: vec![header_gate_num],
+        params: p_fmt,
+    });
+
+    // size: 4 bytes at offset 1
+    let mut p_size = vec![0u8, 1u8, 4u8];
+    p_size.extend_from_slice(&desc.d_size.to_be_bytes());
+    let size_cmp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_CMPOFF,
+        sons: vec![header_gate_num],
+        params: p_size,
+    });
+
+    // width: 4 bytes at offset 5
+    let mut p_width = vec![0u8, 5u8, 4u8];
+    p_width.extend_from_slice(&desc.d_width.to_be_bytes());
+    let width_cmp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_CMPOFF,
+        sons: vec![header_gate_num],
+        params: p_width,
+    });
+
+    // height: 4 bytes at offset 9
+    let mut p_height = vec![0u8, 9u8, 4u8];
+    p_height.extend_from_slice(&desc.d_height.to_be_bytes());
+    let height_cmp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_CMPOFF,
+        sons: vec![header_gate_num],
+        params: p_height,
+    });
+
+    // ── Phase 5: AND chain combining all 6 boolean results ────────────────────
+    let and1 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![sha_comp_gate, thumb_comp_gate], params: vec![] });
+    let and2 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![and1, format_cmp_gate], params: vec![] });
+    let and3 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![and2, size_cmp_gate], params: vec![] });
+    let and4 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![and3, width_cmp_gate], params: vec![] });
+    push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![and4, height_cmp_gate], params: vec![] });
+
+    CompiledCircuitV2 {
+        version: 1,
+        gates,
+        block_size: block_size as u32,
+        num_blocks: m as u32,
+    }
+}
+
+// ── Small builder helpers ──────────────────────────────────────────────────────
+
+/// Push a gate, return its 1-indexed gate number.
+fn push_gate(gates: &mut Vec<GateV2>, g: GateV2) -> i64 {
+    gates.push(g);
+    gates.len() as i64
+}
+
+/// Push a CONST gate from a 32-byte slice (arity 0, params = slice).
+fn push_const1(gates: &mut Vec<GateV2>, data: &[u8]) -> i64 {
+    let mut params = vec![0u8; 32];
+    let n = usize::min(32, data.len());
+    params[..n].copy_from_slice(&data[..n]);
+    push_gate(gates, GateV2 { opcode: OPCODE_CONST, sons: vec![], params })
+}
+
+/// Push a 64-byte constant as two chained CONST gates; returns the 1-indexed number of the second gate.
+/// `data` must be at least 64 bytes.
+fn push_const2(gates: &mut Vec<GateV2>, data: &[u8]) -> i64 {
+    if data.len() < 64 {
+        die("push_const2: data must be at least 64 bytes");
+    }
+    let head = push_gate(gates, GateV2 {
+        opcode: OPCODE_CONST,
+        sons: vec![],
+        params: data[..32].to_vec(),
+    });
+    push_gate(gates, GateV2 {
+        opcode: OPCODE_CONST,
+        sons: vec![head],
+        params: data[32..64].to_vec(),
+    })
+}
+
+/// Build a SHA2 chain over a sequence of block gate indices (0-indexed into gates array).
+/// Returns the 1-indexed gate number of the final SHA2 gate.
+fn sha_chain(gates: &mut Vec<GateV2>, blocks: &[usize]) -> i64 {
+    let mut prev: Option<i64> = None;
+    for &blk_idx in blocks {
+        let blk_gate_num = (blk_idx + 1) as i64;
+        let sons = match prev {
+            None => vec![blk_gate_num],
+            Some(p) => vec![p, blk_gate_num],
+        };
+        prev = Some(push_gate(gates, GateV2 { opcode: OPCODE_SHA2, sons, params: vec![] }));
+    }
+    prev.expect("sha_chain called with empty block list")
 }
 
 fn encode_i64_6(n: i64) -> [u8; 6] {

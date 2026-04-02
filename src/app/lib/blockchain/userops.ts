@@ -470,6 +470,7 @@ export async function sendUserOperationV8(params: {
     signerPrivateKey: string;
     entryPoint: string;
     delegate: string;
+    value?: bigint;
     gas?: Partial<UserOpGasV8>;
     factoryData?: string;
     paymaster?: {

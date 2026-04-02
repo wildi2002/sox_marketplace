@@ -623,11 +623,11 @@ export async function submitCommitmentLeftDirect(
     }
     
     const wallet = new Wallet(privateKey, PROVIDER);
-    const contractWithSigner = contract.connect(wallet);
-    
+    const contractWithSigner = contract.connect(wallet) as any;
+
     console.log("🧪 TEST: Envoi direct de submitCommitmentLeft (sans UserOperation)...");
     console.log("⚠️  ATTENTION: Cela échouera probablement avec UnexpectedSender()");
-    
+
     try {
         const tx = await contractWithSigner.submitCommitmentLeft(
             openingValueBytes,

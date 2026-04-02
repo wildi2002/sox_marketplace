@@ -1,14 +1,19 @@
 import db from "../../lib/sqlite";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
     try {
+        // include_pending=1: vendor view — show all active listings including ZK-pending ones.
+        // Default (marketplace): only show ZK listings that have a completed proof.
+        const includePending = req.nextUrl.searchParams.get("include_pending") === "1";
+        const zkFilter = includePending ? "" : "AND (l.algorithm_suite != 'zk' OR l.zk_proof IS NOT NULL)";
+
         const listings = db.prepare(`
             SELECT l.*,
                    COUNT(CASE WHEN pr.status = 'pending' THEN 1 END) as pending_requests
             FROM listings l
             LEFT JOIN purchase_requests pr ON pr.listing_id = l.id
-            WHERE l.active = 1
+            WHERE l.active = 1 ${zkFilter}
             GROUP BY l.id
             ORDER BY l.created_at DESC
         `).all();
@@ -24,6 +29,8 @@ export async function POST(req: NextRequest) {
         const {
             title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
             listing_type, preview_image, preview_hash, brisque_value,
+            zk_proof, zk_proof_full, zk_h_pt, zk_thumbnail_hash, zk_brisque, zk_vk_hash,
+            ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size,
         } = body;
 
         if (!title || !price || !pk_vendor) {
@@ -32,8 +39,10 @@ export async function POST(req: NextRequest) {
 
         const result = db.prepare(`
             INSERT INTO listings (title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
-                listing_type, preview_image, preview_hash, brisque_value)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                listing_type, preview_image, preview_hash, brisque_value,
+                zk_proof, zk_proof_full, zk_h_pt, zk_thumbnail_hash, zk_brisque, zk_vk_hash,
+                ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             title,
             description || "",
@@ -47,6 +56,16 @@ export async function POST(req: NextRequest) {
             preview_image ?? null,
             preview_hash ?? null,
             brisque_value ?? null,
+            zk_proof ?? null,
+            zk_proof_full ?? null,
+            zk_h_pt ?? null,
+            zk_thumbnail_hash ?? null,
+            zk_brisque ?? null,
+            zk_vk_hash ?? null,
+            ext_img_thumb_hash ?? null,
+            ext_img_width ?? null,
+            ext_img_height ?? null,
+            ext_img_size ?? null,
         );
 
         return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 });

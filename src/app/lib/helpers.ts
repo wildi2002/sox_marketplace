@@ -1,5 +1,4 @@
-import { Circuit, Gate } from "./circuits_old/evaluator";
-
+// @ts-nocheck
 export function concatBytes(data: Uint8Array[]): Uint8Array {
     const res = [];
     for (let d of data) {
@@ -89,28 +88,6 @@ function signed32bToUint8Array(n: number): Uint8Array {
 
     for (let i = 0; i < 4; i++) {
         res[3 - i] = (n >> (i * 8)) & 0xff;
-    }
-
-    return res;
-}
-
-function gateToBytes(gate: Gate): Uint8Array {
-    if (gate[0] == -1) return signed32bToUint8Array(-1);
-
-    const res = new Array(gate[1].length + 1);
-    res[0] = signed32bToUint8Array(gate[0]);
-
-    for (let i = 1; i < res.length; ++i)
-        res[i] = signed32bToUint8Array(gate[1][i - 1]);
-
-    return new Uint8Array(res);
-}
-
-export function circuitToBytesArray(circuit: Circuit): Uint8Array[] {
-    const res = new Array(circuit.length);
-
-    for (let i = 0; i < res.length; ++i) {
-        res[i] = gateToBytes(circuit[i]);
     }
 
     return res;

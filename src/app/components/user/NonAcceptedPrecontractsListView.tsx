@@ -33,6 +33,11 @@ export type Contract = {
     zk_c_k?: string | null;
     zk_thumbnail_hash?: string | null;
     zk_brisque?: number | null;
+    // Extended image description fields
+    ext_img_thumb_hash?: string | null;
+    ext_img_width?: number | null;
+    ext_img_height?: number | null;
+    ext_img_size?: number | null;
 };
 
 interface NonAcceptedPrecontractsListViewProps {
@@ -80,8 +85,9 @@ export default function NonAcceptedPrecontractsListView({
                 <table className="w-full table-fixed border-collapse">
                     <thead>
                         <tr className="border-b border-black text-left font-medium">
-                            <th className="p-2 w-2/10">ID</th>
-                            <th className="p-2 w-6/10">Submitted by</th>
+                            <th className="p-2 w-1/10">ID</th>
+                            <th className="p-2 w-4/10">Submitted by</th>
+                            <th className="p-2 w-3/10">Proof</th>
                             <th className="p-2 w-2/10"></th>
                         </tr>
                     </thead>
@@ -91,9 +97,18 @@ export default function NonAcceptedPrecontractsListView({
                                 key={c.id}
                                 className="even:bg-gray-200 border-b border-black h-15"
                             >
-                                <td className="p-2 w-1/3">{c.id}</td>
-                                <td className="p-2 w-1/3">{c.pk_vendor}</td>
-                                <td className="p-2 w-1/3 text-center">
+                                <td className="p-2">{c.id}</td>
+                                <td className="p-2 truncate">{c.pk_vendor}</td>
+                                <td className="p-2">
+                                    {c.zk_proof_full ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1)</span>
+                                    ) : c.zk_proof ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">Hash Commitment</span>
+                                    ) : c.algorithm_suite === "zk" ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800 font-medium">ZK — no proof</span>
+                                    ) : null}
+                                </td>
+                                <td className="p-2 text-center">
                                     <Button
                                         label="View Details"
                                         onClick={() => handleShowDetails(c)}

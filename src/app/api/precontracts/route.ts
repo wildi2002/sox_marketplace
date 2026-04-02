@@ -112,10 +112,23 @@ async function parseMultipartRequest(
 export async function GET(req: NextRequest) {
     try {
         const pk = await req.nextUrl.searchParams.get("pk");
-        const stmt = db.prepare(`SELECT * FROM contracts 
-            WHERE pk_buyer = ? AND accepted = 0`);
+        const rows = db.prepare(`SELECT * FROM contracts
+            WHERE pk_buyer = ? AND accepted = 0`).all(pk) as any[];
 
-        const contracts = stmt.all(pk);
+        // For extended_image contracts where preview_image is null, fall back to the
+        // listing's preview_image via the purchase_requests join.
+        const contracts = rows.map((c) => {
+            if (c.preview_image || c.algorithm_suite !== "extended_image") return c;
+            const listing = db.prepare(`
+                SELECT l.preview_image
+                FROM purchase_requests pr
+                JOIN listings l ON l.id = pr.listing_id
+                WHERE pr.contract_id = ?
+                LIMIT 1
+            `).get(c.id) as { preview_image: string | null } | undefined;
+            if (listing?.preview_image) return { ...c, preview_image: listing.preview_image };
+            return c;
+        });
 
         return NextResponse.json(contracts);
     } catch (error: any) {
@@ -170,6 +183,7 @@ export async function PUT(req: Request) {
                     protocol_version: parsed.fields.protocol_version,
                     timeout_delay: parsed.fields.timeout_delay,
                     algorithm_suite: parsed.fields.algorithm_suite,
+                    file_name: parsed.fields.file_name,
                 };
 
                 const { stdout } = await execFileAsync(PRECONTRACT_CLI_PATH, [tempFilePath]);
@@ -255,7 +269,7 @@ export async function PUT(req: Request) {
                 algorithm_suite: data.algorithm_suite || "AES-128-CTR",
                 file: preOut.file || preOut.ciphertext || "",
                 file_path: filePath || "",
-                file_name: preOut.file_name || "",
+                file_name: preOut.file_name || data.file_name || "",
                 listing_type: data.listing_type || null,
                 preview_image: data.preview_image || null,
                 preview_hash: data.preview_hash || null,
@@ -266,6 +280,12 @@ export async function PUT(req: Request) {
                 zk_c_k: data.zk_c_k || null,
                 zk_thumbnail_hash: data.zk_thumbnail_hash || null,
                 zk_brisque: data.zk_brisque ?? null,
+                zk_h_pt: data.zk_h_pt || null,
+                zk_vk_hash: data.zk_vk_hash || null,
+                ext_img_thumb_hash: data.ext_img_thumb_hash || null,
+                ext_img_width: data.ext_img_width ?? null,
+                ext_img_height: data.ext_img_height ?? null,
+                ext_img_size: data.ext_img_size ?? null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -284,7 +304,9 @@ export async function PUT(req: Request) {
                 protocol_version, timeout_delay, algorithm_suite,
                 accepted, file_name,
                 listing_type, preview_image, preview_hash, brisque_value,
-                zk_proof, zk_proof_full, zk_h_ct, zk_c_k, zk_thumbnail_hash, zk_brisque
+                zk_proof, zk_proof_full, zk_h_ct, zk_c_k, zk_thumbnail_hash, zk_brisque,
+                zk_h_pt, zk_vk_hash,
+                ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
@@ -292,7 +314,9 @@ export async function PUT(req: Request) {
                 ?, ?, ?,
                 0, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -318,7 +342,13 @@ export async function PUT(req: Request) {
                 contractData.zk_h_ct,
                 contractData.zk_c_k,
                 contractData.zk_thumbnail_hash,
-                contractData.zk_brisque
+                contractData.zk_brisque,
+                contractData.zk_h_pt,
+                contractData.zk_vk_hash,
+                contractData.ext_img_thumb_hash,
+                contractData.ext_img_width,
+                contractData.ext_img_height,
+                contractData.ext_img_size
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);

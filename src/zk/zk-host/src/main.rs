@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use rand::Rng;
 use sp1_sdk::{HashableKey, ProverClient, SP1ProofWithPublicValues, SP1Stdin, SP1_CIRCUIT_VERSION};
 
 /// ELF binary compiled for the RISC-V SP1 zkVM.
@@ -68,15 +67,7 @@ fn cmd_generate(image_path: &str) {
     let image_bytes = std::fs::read(image_path)
         .unwrap_or_else(|e| panic!("Failed to read image {image_path}: {e}"));
 
-    let mut rng = rand::thread_rng();
-    let key: [u8; 16] = rng.gen();
-    let r: [u8; 32] = rng.gen();
-    let iv: [u8; 16] = rng.gen();
-
     let mut stdin = SP1Stdin::new();
-    stdin.write(&key);
-    stdin.write(&r);
-    stdin.write(&iv);
     stdin.write(&image_bytes);
 
     let client = ProverClient::from_env();
@@ -90,12 +81,11 @@ fn cmd_generate(image_path: &str) {
         .expect("execution failed");
 
     let pv = public_values.as_slice();
-    assert!(pv.len() >= 100, "Expected at least 100 bytes of public values, got {}", pv.len());
+    assert!(pv.len() >= 68, "Expected at least 68 bytes of public values, got {}", pv.len());
 
     let h_pt: [u8; 32] = pv[0..32].try_into().unwrap();
     let ap1: [u8; 32] = pv[32..64].try_into().unwrap();
     let ap2_bytes: [u8; 4] = pv[64..68].try_into().unwrap();
-    let c_k: [u8; 32] = pv[68..100].try_into().unwrap();
     let brisque_score = f32::from_le_bytes(ap2_bytes);
 
     eprintln!("Execution complete. BRISQUE={:.2}, generating Groth16 proof...", brisque_score);
@@ -118,10 +108,8 @@ fn cmd_generate(image_path: &str) {
         "proof": hex::encode(&proof_bytes),
         "proof_full": hex::encode(&full_proof_bytes),
         "h_pt": hex::encode(&h_pt),
-        "c_k": hex::encode(&c_k),
         "brisque": brisque_score,
         "thumbnail_hash": hex::encode(&ap1),
-        "key_hex": hex::encode(&key),
         "vk_hash": hex::encode(&vk.bytes32_raw()),
         "sp1_version": SP1_CIRCUIT_VERSION,
     });

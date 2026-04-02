@@ -18,9 +18,14 @@ type Listing = {
     pending_requests: number;
     created_at: string;
     listing_type?: string;
+    algorithm_suite?: string;
     preview_image?: string;
     brisque_value?: number | null;
     preview_hash?: string | null;
+    ext_img_thumb_hash?: string | null;
+    ext_img_width?: number | null;
+    ext_img_height?: number | null;
+    ext_img_size?: number | null;
 };
 
 function BrisqueBadge({ value }: { value: number | null | undefined }) {
@@ -142,10 +147,17 @@ export default function MarketplacePage() {
                             <div className="flex-1">
                                 <div className="flex items-start justify-between gap-2 mb-1">
                                     <h2 className="text-lg font-semibold">{listing.title}</h2>
-                                    <div className="flex gap-1 shrink-0">
-                                        {listing.listing_type === "image" && (
+                                    <div className="flex gap-1 shrink-0 flex-wrap">
+                                        {listing.listing_type === "image" && listing.algorithm_suite === "extended_image" ? (
+                                            <span className="text-xs px-2 py-0.5 rounded font-medium bg-blue-100 text-blue-800">
+                                                {listing.ext_img_width != null && listing.ext_img_height != null
+                                                    ? `${listing.ext_img_width}×${listing.ext_img_height}px`
+                                                    : "Extended Desc"}
+                                                {listing.ext_img_size != null && ` · ${(listing.ext_img_size / 1024).toFixed(0)} KB`}
+                                            </span>
+                                        ) : listing.listing_type === "image" ? (
                                             <BrisqueBadge value={listing.brisque_value} />
-                                        )}
+                                        ) : null}
                                     </div>
                                 </div>
                                 {listing.description && (

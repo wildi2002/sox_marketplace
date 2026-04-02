@@ -210,6 +210,42 @@ try {
         console.warn("Warning adding zk_thumbnail_hash to listings:", e.message);
     }
 }
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN zk_h_pt TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_h_pt to listings:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN zk_brisque REAL");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_brisque to listings:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE listings ADD COLUMN zk_vk_hash TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_vk_hash to listings:", e.message);
+    }
+}
+// Extended image description fields (algorithm_suite = 'extended_image')
+for (const col of [
+    "ext_img_thumb_hash TEXT",
+    "ext_img_width INTEGER",
+    "ext_img_height INTEGER",
+    "ext_img_size INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
 
 try {
     db.exec("ALTER TABLE contracts ADD COLUMN listing_type TEXT");
@@ -279,6 +315,34 @@ try {
 } catch (e: any) {
     if (!e.message?.includes("duplicate column name")) {
         console.warn("Warning adding zk_brisque to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_h_pt TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_h_pt to contracts:", e.message);
+    }
+}
+try {
+    db.exec("ALTER TABLE contracts ADD COLUMN zk_vk_hash TEXT");
+} catch (e: any) {
+    if (!e.message?.includes("duplicate column name")) {
+        console.warn("Warning adding zk_vk_hash to contracts:", e.message);
+    }
+}
+for (const col of [
+    "ext_img_thumb_hash TEXT",
+    "ext_img_width INTEGER",
+    "ext_img_height INTEGER",
+    "ext_img_size INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
     }
 }
 

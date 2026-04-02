@@ -20,7 +20,7 @@ pub fn thumbnail_hash(image_bytes: &[u8]) -> Result<[u8; 32], String> {
         (nw, nh)
     };
 
-    let resized = image::imageops::resize(&img.to_rgba8(), new_w, new_h, FilterType::Lanczos3);
+    let resized = image::imageops::resize(&img.to_rgba8(), new_w, new_h, FilterType::Triangle);
     let raw = resized.as_raw();
     Ok(sha256(raw))
 }
@@ -46,7 +46,7 @@ fn decode_jpeg(jpeg_bytes: &[u8]) -> Result<DynamicImage, String> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
 
-    let options = DecoderOptions::new_fast()
+    let options = DecoderOptions::default()
         .jpeg_set_out_colorspace(ColorSpace::RGB);
 
     let cursor = ZCursor::new(jpeg_bytes);

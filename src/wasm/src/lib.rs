@@ -13,7 +13,10 @@ use crate::circuits::{
     compile_basic_circuit, evaluate_circuit_internal, get_evaluated_sons, is_constant_idx,
     CompiledCircuit,
 };
-use crate::circuits_v2::{compile_circuit_v2, evaluate_circuit_v2, CompiledCircuitV2, GateV2};
+use crate::circuits_v2::{
+    compile_circuit_v2, compile_circuit_extended_image_v2,
+    evaluate_circuit_v2, CompiledCircuitV2, GateV2, ExtendedImageDesc,
+};
 use crate::commitment::{commit_hashes, open_commitment_internal, Commitment};
 use crate::encryption::{decrypt, encrypt_and_prepend_iv};
 use crate::sha256::sha256;
@@ -153,6 +156,79 @@ pub fn check_precontract(
                 h_circuit,
                 h_ct,
             }
+        }
+    }
+}
+
+/// Verifies a V2 precontract by checking the commitment and description with respect to the
+/// received ciphertext, using the V2 circuit.
+///
+/// # Arguments
+/// * `description` - Hex-encoded description hash
+/// * `commitment` - Hex-encoded commitment
+/// * `opening_value` - Hex-encoded opening value
+/// * `ct` - Ciphertext bytes
+///
+/// # Returns
+/// A `CheckPrecontractResult` containing the verification status and hash values
+#[wasm_bindgen]
+pub fn check_precontract_v2(
+    description: String,
+    commitment: String,
+    opening_value: String,
+    ct: &[u8],
+) -> CheckPrecontractResult {
+    let description_bytes = hex_to_bytes(description);
+    let circuit = compile_circuit_v2(ct, &description_bytes);
+    let h_ct = acc_ct(ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    match open_commitment_internal(&hex_to_bytes(commitment), &hex_to_bytes(opening_value)) {
+        Ok(opened) => {
+            let success =
+                opened.len() == 64 && opened[..32].eq(&h_circuit) && opened[32..].eq(&h_ct);
+            CheckPrecontractResult {
+                success,
+                h_circuit,
+                h_ct,
+            }
+        }
+        Err(msg) => {
+            error(msg);
+            CheckPrecontractResult {
+                success: false,
+                h_circuit,
+                h_ct,
+            }
+        }
+    }
+}
+
+/// Native (non-WASM) result type for check_precontract_native
+pub struct NativeCheckPrecontractResult {
+    pub success: bool,
+    pub h_circuit: Vec<u8>,
+    pub h_ct: Vec<u8>,
+}
+
+/// Native version of check_precontract_v2 for use in CLI binaries.
+pub fn check_precontract_native(
+    description: &str,
+    commitment: &str,
+    opening_value: &str,
+    ct: &[u8],
+) -> NativeCheckPrecontractResult {
+    let description_bytes = hex_to_bytes(description.to_string());
+    let circuit = compile_circuit_v2(ct, &description_bytes);
+    let h_ct = acc_ct(ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    match open_commitment_internal(&hex_to_bytes(commitment.to_string()), &hex_to_bytes(opening_value.to_string())) {
+        Ok(opened) => {
+            let success =
+                opened.len() == 64 && opened[..32].eq(&h_circuit) && opened[32..].eq(&h_ct);
+            NativeCheckPrecontractResult { success, h_circuit, h_ct }
+        }
+        Err(_) => {
+            NativeCheckPrecontractResult { success: false, h_circuit, h_ct }
         }
     }
 }
@@ -689,6 +765,133 @@ pub fn compute_precontract_values_v2(file: &mut [u8], key: &[u8]) -> Precontract
         num_blocks,
         num_gates,
     }
+}
+
+/// Computes precontract values for an image using the extended description circuit.
+///
+/// The ciphertext must wrap a BMP container:
+///   bytes   0– 63: header (format 1B | size 4B | width 4B | height 4B | reserved 51B)
+///   bytes  64–3135: 32×32 raw-RGB thumbnail
+///   bytes 3136+  : BMP pixel data
+///
+/// # Arguments
+/// * `file`       - Plaintext file bytes (in BMP container format)
+/// * `key`        - AES-128 encryption key (16 bytes)
+/// * `d_sha`      - SHA256(file) — 32 bytes
+/// * `d_thumb`    - SHA256(thumbnail bytes 64..3136) — 32 bytes
+/// * `d_width`    - Image width in pixels
+/// * `d_height`   - Image height in pixels
+/// * `d_format`   - Format tag (0 = BMP)
+/// * `d_size`     - File size in bytes
+///
+/// # Returns
+/// A `Precontract` with the extended-image circuit committed.
+#[wasm_bindgen]
+pub fn compute_precontract_extended_image_v2(
+    file: &mut [u8],
+    key: &[u8],
+    d_sha: &[u8],
+    d_thumb: &[u8],
+    d_width: u32,
+    d_height: u32,
+    d_format: u8,
+    d_size: u32,
+) -> Precontract {
+    let mut sha_arr = [0u8; 32];
+    let mut thumb_arr = [0u8; 32];
+    sha_arr.copy_from_slice(&d_sha[..32]);
+    thumb_arr.copy_from_slice(&d_thumb[..32]);
+
+    let desc = ExtendedImageDesc {
+        d_sha: sha_arr,
+        d_thumb: thumb_arr,
+        d_width,
+        d_height,
+        d_format,
+        d_size,
+    };
+
+    // description = d_sha(32) || d_thumb(32) || d_width(4 BE) || d_height(4 BE) || d_size(4 BE)
+    let mut description = Vec::with_capacity(76);
+    description.extend_from_slice(&sha_arr);
+    description.extend_from_slice(&thumb_arr);
+    description.extend_from_slice(&d_width.to_be_bytes());
+    description.extend_from_slice(&d_height.to_be_bytes());
+    description.extend_from_slice(&d_size.to_be_bytes());
+    let ct = encrypt_and_prepend_iv(file, key);
+    let circuit = compile_circuit_extended_image_v2(&ct, &desc);
+    let num_blocks = circuit.num_blocks;
+    let num_gates = circuit.gates.len() as u32;
+    let circuit_bytes = circuit.to_bytes();
+    let h_ct = acc_ct(&ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    let commitment = commit_hashes(&h_circuit, &h_ct);
+
+    Precontract {
+        ct,
+        circuit_bytes,
+        description,
+        h_ct,
+        h_circuit,
+        commitment,
+        num_blocks,
+        num_gates,
+    }
+}
+
+/// Compiles an extended-image V2 circuit from a 76-byte serialised description:
+///   bytes  0-31: SHA256(x)          (d_sha)
+///   bytes 32-63: SHA256(thumbnail)  (d_thumb)
+///   bytes 64-67: width  (BE u32)    (d_width)
+///   bytes 68-71: height (BE u32)    (d_height)
+///   bytes 72-75: size   (BE u32)    (d_size)
+#[wasm_bindgen]
+pub fn compile_circuit_extended_image_v2_wasm(ct: &[u8], description: &[u8]) -> Vec<u8> {
+    if description.len() != 76 {
+        crate::utils::die("Extended-image description must be exactly 76 bytes");
+    }
+    let mut d_sha = [0u8; 32];
+    let mut d_thumb = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]);
+    d_thumb.copy_from_slice(&description[32..64]);
+    let d_width  = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    let desc = ExtendedImageDesc { d_sha, d_thumb, d_width, d_height, d_format: 0, d_size };
+    compile_circuit_extended_image_v2(ct, &desc).to_bytes()
+}
+
+/// Decrypts a ciphertext and verifies all extended-image description components:
+///   SHA256(x), SHA256(thumb), width, height, size — against the 76-byte description tuple.
+#[wasm_bindgen]
+pub fn check_received_ct_key_extended_image_v2(
+    ct: &mut [u8],
+    key: &[u8],
+    description: &[u8],
+) -> CheckCtResult {
+    if description.len() != 76 {
+        crate::utils::die("Extended-image description must be exactly 76 bytes");
+    }
+    let decrypted = decrypt(ct, key);
+
+    let d_sha   = &description[0..32];
+    let d_thumb = &description[32..64];
+    let d_width  = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
+
+    let sha_ok    = sha256(&decrypted).as_slice() == d_sha;
+    let thumb_ok  = decrypted.len() >= 3136
+        && sha256(&decrypted[64..3136]).as_slice() == d_thumb;
+    let width_ok  = decrypted.len() >= 9
+        && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_width;
+    let height_ok = decrypted.len() >= 13
+        && u32::from_be_bytes(decrypted[9..13].try_into().unwrap()) == d_height;
+    let size_ok   = decrypted.len() >= 5
+        && u32::from_be_bytes(decrypted[1..5].try_into().unwrap()) == d_size;
+
+    let success = sha_ok && thumb_ok && width_ok && height_ok && size_ok;
+    CheckCtResult { success, decrypted_file: decrypted }
 }
 
 /// Represents an evaluated V2 circuit with its values.

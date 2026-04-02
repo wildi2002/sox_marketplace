@@ -157,6 +157,51 @@ async function uploadCiphertext(filePath, contractId) {
 }
 
 const ZK_HOST_PATH = path.join(__dirname, '..', 'src', 'zk', 'target', 'release', 'zk-host');
+const BRISQUE_SCRIPT = path.join(__dirname, '..', 'src', 'scripts', 'brisque_from_file.py');
+
+// Compute BRISQUE via Python script (fallback when Rust returns 0 or unavailable).
+function runPythonBrisque(filePath) {
+    return new Promise((resolve) => {
+        const child = spawn('python3', [BRISQUE_SCRIPT, filePath], {
+            cwd: path.join(__dirname, '..'),
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        child.stdout.on('data', (d) => { stdout += d.toString(); });
+        child.on('close', (code) => {
+            if (code === 0) {
+                try {
+                    const result = JSON.parse(stdout.trim());
+                    resolve(typeof result.brisque === 'number' ? result.brisque : null);
+                } catch { resolve(null); }
+            } else { resolve(null); }
+        });
+        child.on('error', () => resolve(null));
+    });
+}
+
+// PATCH JSON to a local API endpoint (used by background IPC handlers).
+function patchJson(urlStr, body) {
+    return new Promise((resolve, reject) => {
+        const url = new URL(urlStr);
+        const data = JSON.stringify(body);
+        const transport = url.protocol === 'https:' ? https : http;
+        const req = transport.request({
+            method: 'PATCH',
+            hostname: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? 443 : 80),
+            path: url.pathname + url.search,
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+        }, (res) => {
+            let body = '';
+            res.on('data', (chunk) => { body += chunk.toString(); });
+            res.on('end', () => resolve(body));
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
 
 function runZkHost(args, env = {}) {
     return new Promise((resolve, reject) => {
@@ -233,12 +278,17 @@ ipcMain.handle('analyzeImage', async () => {
         const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
         const imageDataUrl = `data:${mime};base64,${imageBytes.toString('base64')}`;
 
+        // Use Rust BRISQUE if valid (non-zero), else fall back to Python implementation.
+        let brisque = (typeof analyzed.brisque === 'number' && analyzed.brisque > 0)
+            ? analyzed.brisque
+            : await runPythonBrisque(filePath);
+
         return {
             success: true,
             filePath,
             imageDataUrl,
             thumbnail_hash: analyzed.thumbnail_hash,
-            brisque: analyzed.brisque,
+            brisque,
         };
     } catch (error) {
         return { error: error.message || 'analyzeImage failed' };
@@ -280,6 +330,32 @@ ipcMain.handle('verifyZkProof', async (_event, payload) => {
         }
     } catch (error) {
         return { error: error.message || 'verifyZkProof failed' };
+    }
+});
+
+// generateZkProofForListing: generate proof in background and patch listing when done.
+// The renderer fires this without awaiting — the main process handles it and updates the DB.
+ipcMain.handle('generateZkProofForListing', async (_event, { listingId, filePath }) => {
+    try {
+        if (!fs.existsSync(ZK_HOST_PATH)) {
+            return { error: 'zk-host binary not found' };
+        }
+        if (!filePath || !fs.existsSync(filePath)) {
+            return { error: `Image file not found: ${filePath}` };
+        }
+        const result = await runZkHost(['generate', '--image', filePath]);
+        const apiUrl = `${getApiBaseUrl()}/api/listings/${listingId}/zk-proof`;
+        await patchJson(apiUrl, {
+            zk_proof: result.proof ?? null,
+            zk_proof_full: result.proof_full ?? null,
+            zk_h_pt: result.h_pt ?? null,
+            zk_thumbnail_hash: result.thumbnail_hash ?? null,
+            zk_brisque: result.brisque ?? null,
+            zk_vk_hash: result.vk_hash ?? null,
+        });
+        return { success: true };
+    } catch (error) {
+        return { error: error.message || 'generateZkProofForListing failed' };
     }
 });
 

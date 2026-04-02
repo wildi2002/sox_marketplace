@@ -794,89 +794,94 @@ use model::{BRISQUE_RHO, BRISQUE_GAMMA, BRISQUE_MIN, BRISQUE_MAX, BRISQUE_COEFFS
 
 /// Compute BRISQUE image quality score (0=best, 100=worst).
 pub fn compute_brisque(image_bytes: &[u8]) -> Result<f32, String> {
-    // Load and convert to grayscale f64 in [0,1]
-    // Use crate::thumbnail::load_image which uses zune-jpeg for JPEG (no threading)
     let img = crate::thumbnail::load_image(image_bytes)?;
+
+    // Cap to 512×512 before any computation — reduces convolution cost ~30× for large images.
+    // Uses integer arithmetic only (no soft-float) for the dimension calculation.
+    let img = if img.width() > 512 || img.height() > 512 {
+        let max_dim = img.width().max(img.height()) as u64;
+        let new_w = (img.width() as u64 * 512 / max_dim) as u32;
+        let new_h = (img.height() as u64 * 512 / max_dim) as u32;
+        image::DynamicImage::ImageRgb8(
+            image::imageops::resize(&img.to_rgb8(), new_w, new_h, image::imageops::FilterType::Triangle)
+        )
+    } else {
+        img
+    };
+
+    // Convert to grayscale f32 in [0,1] — f32 is ~2× cheaper than f64 in riscv32im soft-float
     let rgb = img.to_rgb8();
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-    let gray: Vec<f64> = rgb.pixels().map(|p| {
-        0.2126 * (p[0] as f64 / 255.0)
-        + 0.7152 * (p[1] as f64 / 255.0)
-        + 0.0722 * (p[2] as f64 / 255.0)
+    let gray: Vec<f32> = rgb.pixels().map(|p| {
+        0.299_f32 * (p[0] as f32 / 255.0)
+        + 0.587_f32 * (p[1] as f32 / 255.0)
+        + 0.114_f32 * (p[2] as f32 / 255.0)
     }).collect();
 
     // Scale 1 features
     let feats1 = brisque_features_at_scale(&gray, h, w);
 
-    // Scale 2: downsample by 0.5
+    // Scale 2: downsample by 0.5 using integer resize
     let small_w = (w / 2).max(1);
     let small_h = (h / 2).max(1);
     let gray_img = image::GrayImage::from_fn(w as u32, h as u32, |x, y| {
         let v = (gray[y as usize * w + x as usize] * 255.0).clamp(0.0, 255.0) as u8;
         image::Luma([v])
     });
-    let small = image::imageops::resize(&gray_img, small_w as u32, small_h as u32, image::imageops::FilterType::Lanczos3);
-    let gray2: Vec<f64> = small.pixels().map(|p| p[0] as f64 / 255.0).collect();
+    let small = image::imageops::resize(&gray_img, small_w as u32, small_h as u32, image::imageops::FilterType::Triangle);
+    let gray2: Vec<f32> = small.pixels().map(|p| p[0] as f32 / 255.0).collect();
     let feats2 = brisque_features_at_scale(&gray2, small_h, small_w);
 
     // Concatenate 18+18 = 36 features
-    let mut features: Vec<f64> = feats1;
+    let mut features: Vec<f32> = feats1;
     features.extend_from_slice(&feats2);
     assert_eq!(features.len(), 36);
 
     // Normalize to [-1, 1]
-    let scaled: Vec<f64> = features.iter().enumerate().map(|(i, &f)| {
-        let mn = BRISQUE_MIN[i];
-        let mx = BRISQUE_MAX[i];
-        if (mx - mn).abs() < 1e-12 {
+    let scaled: Vec<f32> = features.iter().enumerate().map(|(i, &f)| {
+        let mn = BRISQUE_MIN[i] as f32;
+        let mx = BRISQUE_MAX[i] as f32;
+        if (mx - mn).abs() < 1e-6 {
             0.0
         } else {
             -1.0 + 2.0 * (f - mn) / (mx - mn)
         }
     }).collect();
 
-    let score = svm_predict(&scaled);
-    Ok(score as f32)
+    Ok(svm_predict(&scaled))
 }
 
-fn brisque_features_at_scale(gray: &[f64], h: usize, w: usize) -> Vec<f64> {
+fn brisque_features_at_scale(gray: &[f32], h: usize, w: usize) -> Vec<f32> {
     let mscn = mscn_coefficients(gray, h, w);
 
     let mut feats = Vec::with_capacity(18);
 
-    // MSCN AGGD
     let (alpha, _mean, sigma_l_sq, sigma_r_sq) = aggd_fit(&mscn);
-    let var = (sigma_l_sq + sigma_r_sq) / 2.0;
     feats.push(alpha);
-    feats.push(var);
+    feats.push((sigma_l_sq + sigma_r_sq) / 2.0);
 
-    // Pairwise products
-    // Horizontal: mscn[i,j] * mscn[i,j+1]
-    let mut h_prod: Vec<f64> = Vec::with_capacity(h * (w - 1));
+    let mut h_prod: Vec<f32> = Vec::with_capacity(h * (w - 1));
     for row in 0..h {
         for col in 0..w - 1 {
             h_prod.push(mscn[row * w + col] * mscn[row * w + col + 1]);
         }
     }
 
-    // Vertical: mscn[i,j] * mscn[i+1,j]
-    let mut v_prod: Vec<f64> = Vec::with_capacity((h - 1) * w);
+    let mut v_prod: Vec<f32> = Vec::with_capacity((h - 1) * w);
     for row in 0..h - 1 {
         for col in 0..w {
             v_prod.push(mscn[row * w + col] * mscn[(row + 1) * w + col]);
         }
     }
 
-    // Main diagonal: mscn[i,j] * mscn[i+1,j+1]
-    let mut d1_prod: Vec<f64> = Vec::with_capacity((h - 1) * (w - 1));
+    let mut d1_prod: Vec<f32> = Vec::with_capacity((h - 1) * (w - 1));
     for row in 0..h - 1 {
         for col in 0..w - 1 {
             d1_prod.push(mscn[row * w + col] * mscn[(row + 1) * w + col + 1]);
         }
     }
 
-    // Second diagonal: mscn[i+1,j] * mscn[i,j+1]
-    let mut d2_prod: Vec<f64> = Vec::with_capacity((h - 1) * (w - 1));
+    let mut d2_prod: Vec<f32> = Vec::with_capacity((h - 1) * (w - 1));
     for row in 0..h - 1 {
         for col in 0..w - 1 {
             d2_prod.push(mscn[(row + 1) * w + col] * mscn[row * w + col + 1]);
@@ -894,54 +899,53 @@ fn brisque_features_at_scale(gray: &[f64], h: usize, w: usize) -> Vec<f64> {
     feats
 }
 
-fn mscn_coefficients(image: &[f64], h: usize, w: usize) -> Vec<f64> {
-    const C: f64 = 1.0 / 255.0;
+fn mscn_coefficients(image: &[f32], h: usize, w: usize) -> Vec<f32> {
+    const C: f32 = 1.0 / 255.0;
     let kernel_size = 7;
-    let sigma = 7.0_f64 / 6.0;
+    let sigma = 7.0_f32 / 6.0;
     let kernel = gaussian_kernel_2d(kernel_size, sigma);
 
     let mu = convolve2d_same(image, h, w, &kernel, kernel_size);
 
-    let img_sq: Vec<f64> = image.iter().map(|&x| x * x).collect();
+    let img_sq: Vec<f32> = image.iter().map(|&x| x * x).collect();
     let mu_sq_conv = convolve2d_same(&img_sq, h, w, &kernel, kernel_size);
 
     let mut mscn = Vec::with_capacity(h * w);
     for i in 0..h * w {
         let sigma_sq = (mu_sq_conv[i] - mu[i] * mu[i]).abs();
-        let sigma_val = sigma_sq.sqrt();
+        let sigma_val = libm::sqrtf(sigma_sq);
         mscn.push((image[i] - mu[i]) / (sigma_val + C));
     }
     mscn
 }
 
-fn gaussian_kernel_2d(n: usize, sigma: f64) -> Vec<f64> {
-    let mut k = vec![0.0_f64; n * n];
+fn gaussian_kernel_2d(n: usize, sigma: f32) -> Vec<f32> {
+    let mut k = vec![0.0_f32; n * n];
     let half = (n / 2) as i64;
     let two_sigma_sq = 2.0 * sigma * sigma;
-    let norm = 1.0 / (core::f64::consts::PI * two_sigma_sq);
-    let mut sum = 0.0;
+    let norm = 1.0 / (core::f32::consts::PI * two_sigma_sq);
+    let mut sum = 0.0_f32;
     for i in 0..n {
         for j in 0..n {
-            let x = (i as i64 - half) as f64;
-            let y = (j as i64 - half) as f64;
-            let v = norm * libm::exp(-(x * x + y * y) / two_sigma_sq);
+            let x = (i as i64 - half) as f32;
+            let y = (j as i64 - half) as f32;
+            let v = norm * libm::expf(-(x * x + y * y) / two_sigma_sq);
             k[i * n + j] = v;
             sum += v;
         }
     }
-    // Normalize
     for v in k.iter_mut() {
         *v /= sum;
     }
     k
 }
 
-fn convolve2d_same(image: &[f64], h: usize, w: usize, kernel: &[f64], kn: usize) -> Vec<f64> {
+fn convolve2d_same(image: &[f32], h: usize, w: usize, kernel: &[f32], kn: usize) -> Vec<f32> {
     let half = (kn / 2) as i64;
-    let mut out = vec![0.0_f64; h * w];
+    let mut out = vec![0.0_f32; h * w];
     for row in 0..h {
         for col in 0..w {
-            let mut acc = 0.0_f64;
+            let mut acc = 0.0_f32;
             for ki in 0..kn {
                 for kj in 0..kn {
                     let r = row as i64 - half + ki as i64;
@@ -957,83 +961,78 @@ fn convolve2d_same(image: &[f64], h: usize, w: usize, kernel: &[f64], kn: usize)
     out
 }
 
-fn aggd_fit(x: &[f64]) -> (f64, f64, f64, f64) {
+fn aggd_fit(x: &[f32]) -> (f32, f32, f32, f32) {
     if x.is_empty() {
         return (1.0, 0.0, 1.0, 1.0);
     }
-    let n = x.len() as f64;
+    let n = x.len() as f32;
 
-    let mean_abs = x.iter().map(|&v| v.abs()).sum::<f64>() / n;
-    let mean_sq = x.iter().map(|&v| v * v).sum::<f64>() / n;
+    let mean_abs = x.iter().map(|&v| libm::fabsf(v)).sum::<f32>() / n;
+    let mean_sq = x.iter().map(|&v| v * v).sum::<f32>() / n;
 
-    let left: Vec<f64> = x.iter().filter(|&&v| v < 0.0).map(|&v| v * v).collect();
-    let right: Vec<f64> = x.iter().filter(|&&v| v >= 0.0).map(|&v| v * v).collect();
+    let mut sum_l = 0.0_f32; let mut cnt_l = 0_usize;
+    let mut sum_r = 0.0_f32; let mut cnt_r = 0_usize;
+    for &v in x {
+        if v < 0.0 { sum_l += v * v; cnt_l += 1; }
+        else        { sum_r += v * v; cnt_r += 1; }
+    }
+    let sigma_l_sq = if cnt_l == 0 { 1e-6 } else { sum_l / cnt_l as f32 };
+    let sigma_r_sq = if cnt_r == 0 { 1e-6 } else { sum_r / cnt_r as f32 };
 
-    let sigma_l_sq = if left.is_empty() { 1e-6 } else { left.iter().sum::<f64>() / left.len() as f64 };
-    let sigma_r_sq = if right.is_empty() { 1e-6 } else { right.iter().sum::<f64>() / right.len() as f64 };
-
-    let gamma_hat = sigma_l_sq.sqrt() / sigma_r_sq.sqrt().max(1e-12);
-
-    let r_hat = if mean_sq < 1e-12 { 1.0 } else { mean_abs * mean_abs / mean_sq };
+    let gamma_hat = libm::sqrtf(sigma_l_sq) / libm::sqrtf(sigma_r_sq).max(1e-6);
+    let r_hat = if mean_sq < 1e-6 { 1.0 } else { mean_abs * mean_abs / mean_sq };
 
     let r_hat_num = (gamma_hat.powi(3) + 1.0) * (gamma_hat + 1.0);
     let r_hat_den = (gamma_hat * gamma_hat + 1.0).powi(2);
-    let r_hat_target = r_hat * r_hat_num / r_hat_den.max(1e-12);
+    let r_hat_target = r_hat * r_hat_num / r_hat_den.max(1e-6);
 
-    // Bisection to find alpha s.t. Gamma(2/a)^2 / (Gamma(1/a)*Gamma(3/a)) = r_hat_target
     let alpha = bisect_alpha(r_hat_target);
 
-    let tg_1a = libm::tgamma(1.0 / alpha);
-    let tg_2a = libm::tgamma(2.0 / alpha);
-    let tg_3a = libm::tgamma(3.0 / alpha);
+    let tg_1a = libm::tgammaf(1.0 / alpha);
+    let tg_2a = libm::tgammaf(2.0 / alpha);
+    let tg_3a = libm::tgammaf(3.0 / alpha);
 
-    let ratio = if tg_3a.abs() < 1e-12 { 1.0 } else { tg_1a / tg_3a };
-    let mean_val = (sigma_r_sq.sqrt() - sigma_l_sq.sqrt()) * tg_2a * ratio.sqrt() / tg_1a.max(1e-12);
+    let ratio = if tg_3a.abs() < 1e-6 { 1.0 } else { tg_1a / tg_3a };
+    let mean_val = (libm::sqrtf(sigma_r_sq) - libm::sqrtf(sigma_l_sq))
+        * tg_2a * libm::sqrtf(ratio) / tg_1a.max(1e-6);
 
     (alpha, mean_val, sigma_l_sq, sigma_r_sq)
 }
 
-fn bisect_alpha(target: f64) -> f64 {
-    let mut lo = 0.2_f64;
-    let mut hi = 10.0_f64;
+fn bisect_alpha(target: f32) -> f32 {
+    let mut lo = 0.2_f32;
+    let mut hi = 10.0_f32;
 
-    // f(alpha) = Gamma(2/a)^2 / (Gamma(1/a) * Gamma(3/a))
-    let f = |a: f64| -> f64 {
-        let g1 = libm::tgamma(1.0 / a);
-        let g2 = libm::tgamma(2.0 / a);
-        let g3 = libm::tgamma(3.0 / a);
+    let f = |a: f32| -> f32 {
+        let g1 = libm::tgammaf(1.0 / a);
+        let g2 = libm::tgammaf(2.0 / a);
+        let g3 = libm::tgammaf(3.0 / a);
         let denom = g1 * g3;
-        if denom.abs() < 1e-30 { 0.0 } else { g2 * g2 / denom }
+        if denom.abs() < 1e-20 { 0.0 } else { g2 * g2 / denom }
     };
 
-    // f is monotonically increasing with alpha on (0, inf]
-    // (larger alpha → distribution more Gaussian → higher R_hat)
-    for _ in 0..64 {
+    for _ in 0..32 {
         let mid = (lo + hi) / 2.0;
-        if f(mid) < target {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
+        if f(mid) < target { lo = mid; } else { hi = mid; }
     }
     (lo + hi) / 2.0
 }
 
-fn svm_predict(scaled_features: &[f64]) -> f64 {
+fn svm_predict(scaled_features: &[f32]) -> f32 {
     let n_sv = 770_usize;
     let n_feat = 36_usize;
-    let gamma = BRISQUE_GAMMA;
+    let gamma = BRISQUE_GAMMA as f32;
 
-    let mut decision = BRISQUE_RHO;
+    let mut decision = -(BRISQUE_RHO as f32);
     for i in 0..n_sv {
         let sv = &BRISQUE_SVS[i * n_feat..(i + 1) * n_feat];
-        let mut dist_sq = 0.0_f64;
+        let mut dist_sq = 0.0_f32;
         for j in 0..n_feat {
-            let diff = scaled_features[j] - sv[j];
+            let diff = scaled_features[j] - sv[j] as f32;
             dist_sq += diff * diff;
         }
-        let k = libm::exp(-gamma * dist_sq);
-        decision += BRISQUE_COEFFS[i] * k;
+        let k = libm::expf(-gamma * dist_sq);
+        decision += BRISQUE_COEFFS[i] as f32 * k;
     }
     decision.clamp(0.0, 100.0)
 }

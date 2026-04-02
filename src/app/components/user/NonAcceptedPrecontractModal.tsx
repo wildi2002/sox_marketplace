@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Modal from "../common/Modal";
 import Button from "../common/Button";
 import { Contract } from "./NonAcceptedPrecontractsListView";
-import initWasm, { check_precontract, bytes_to_hex } from "@/app/lib/crypto_lib";
+import initWasm, { check_precontract_v2, bytes_to_hex } from "@/app/lib/crypto_lib";
 import { hexToBytes, downloadFile } from "@/app/lib/helpers";
 import ChfNote from "../common/ChfNote";
 import { useToast } from "@/app/lib/ToastContext";
@@ -29,6 +29,7 @@ export default function NonAcceptedPrecontractModal({
     const [zkStatus, setZkStatus] = useState<ZkStatus>("idle");
     const [zkReason, setZkReason] = useState<string | undefined>();
     const [zkChecks, setZkChecks] = useState<{thumbnailMatch?: boolean; brisqueMatch?: boolean; cryptoValid?: boolean; hPtMatch?: boolean} | null>(null);
+    const [previewThumbStatus, setPreviewThumbStatus] = useState<"idle" | "checking" | "ok" | "warn">("idle");
     const { showToast } = useToast();
 
     if (!contract) return null;
@@ -56,6 +57,10 @@ export default function NonAcceptedPrecontractModal({
         zk_c_k,
         zk_thumbnail_hash,
         zk_brisque,
+        ext_img_thumb_hash,
+        ext_img_width,
+        ext_img_height,
+        ext_img_size,
     } = contract;
 
     // Auto-verify ZK proof when modal opens for image listings
@@ -177,6 +182,50 @@ export default function NonAcceptedPrecontractModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [contract?.id]);
 
+    // For extended_image: verify that the preview image shown to the buyer matches
+    // d_thumb (SHA256 of 32×32 RGB thumbnail) committed in the description tuple.
+    // d_thumb is at bytes 32-63 of item_description (hex chars 64-127).
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useEffect(() => {
+        if (algorithm_suite !== "extended_image") return;
+        if (!preview_image) { setPreviewThumbStatus("idle"); return; }
+
+        // Extract d_thumb from item_description (76-byte tuple) or fall back to ext_img_thumb_hash
+        const descHex = (item_description || "").replace(/^0x/, "");
+        const dThumbHex = descHex.length >= 128
+            ? descHex.slice(64, 128)
+            : (ext_img_thumb_hash || "").replace(/^0x/, "");
+
+        if (!dThumbHex) return;
+
+        setPreviewThumbStatus("checking");
+        (async () => {
+            try {
+                const resp = await fetch(preview_image);
+                const blob = await resp.blob();
+                const bitmap = await createImageBitmap(blob);
+                const canvas = new OffscreenCanvas(32, 32);
+                const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+                ctx.drawImage(bitmap, 0, 0, 32, 32);
+                bitmap.close();
+                const imgData = ctx.getImageData(0, 0, 32, 32);
+                const rgb = new Uint8Array(3072);
+                for (let i = 0; i < 1024; i++) {
+                    rgb[i * 3]     = imgData.data[i * 4];
+                    rgb[i * 3 + 1] = imgData.data[i * 4 + 1];
+                    rgb[i * 3 + 2] = imgData.data[i * 4 + 2];
+                }
+                const hashBuf = await crypto.subtle.digest("SHA-256", rgb);
+                const hash = Array.from(new Uint8Array(hashBuf))
+                    .map(b => b.toString(16).padStart(2, "0")).join("");
+                setPreviewThumbStatus(hash === dThumbHex ? "ok" : "warn");
+            } catch {
+                setPreviewThumbStatus("idle");
+            }
+        })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [contract?.id]);
+
     const handleVerifyCommitment = async () => {
         setIsVerifying(true);
         setVerifyResult(null);
@@ -194,7 +243,7 @@ export default function NonAcceptedPrecontractModal({
             const ctBytes = hexToBytes(ctHex);
 
             // 3. Verify commitment entirely in the browser — no server involvement
-            const result = check_precontract(item_description, commitment, opening_value, ctBytes);
+            const result = check_precontract_v2(item_description, commitment, opening_value, ctBytes);
 
             if (result.success) {
                 const h_circuit_hex = bytes_to_hex(result.h_circuit);
@@ -278,7 +327,16 @@ export default function NonAcceptedPrecontractModal({
                                 <p className="text-gray-500 text-xs">
                                     This is what the vendor claims the image looks like. After accepting and decrypting, verify the file matches this preview exactly.
                                 </p>
-                                {brisque_value != null && (
+                                {algorithm_suite === "extended_image" ? (
+                                    <div className="mt-1 text-xs text-gray-600 space-y-0.5">
+                                        {ext_img_width != null && <p>Width: {ext_img_width} px</p>}
+                                        {ext_img_height != null && <p>Height: {ext_img_height} px</p>}
+                                        {ext_img_size != null && <p>Size: {ext_img_size.toLocaleString()} B</p>}
+                                        {ext_img_thumb_hash && (
+                                            <p className="font-mono break-all">Thumb hash: {ext_img_thumb_hash.slice(0, 20)}…</p>
+                                        )}
+                                    </div>
+                                ) : brisque_value != null ? (
                                     <span className={`inline-block text-xs px-2 py-0.5 rounded font-medium mt-1 ${
                                         brisque_value < 30 ? "bg-green-100 text-green-800" :
                                         brisque_value < 60 ? "bg-yellow-100 text-yellow-800" :
@@ -286,11 +344,91 @@ export default function NonAcceptedPrecontractModal({
                                     }`}>
                                         Claimed BRISQUE {brisque_value.toFixed(1)} · {brisque_value < 30 ? "Good" : brisque_value < 60 ? "Average" : "Low"} quality
                                     </span>
-                                )}
+                                ) : null}
                             </div>
                         </div>
 
-                        {/* ZK / Quality Commitment Verification */}
+                        {/* Extended image: description summary + d_thumb preview verification */}
+                        {algorithm_suite === "extended_image" && (() => {
+                            const descHex = (item_description || "").replace(/^0x/, "");
+                            const descBytes = descHex.length / 2;
+                            const isLegacy = descBytes < 76;
+                            const dShaHex   = !isLegacy ? descHex.slice(0, 64)   : descHex;
+                            const dThumbHex = !isLegacy ? descHex.slice(64, 128) : null;
+                            const dWidth    = !isLegacy ? parseInt(descHex.slice(128, 136), 16) : null;
+                            const dHeight   = !isLegacy ? parseInt(descHex.slice(136, 144), 16) : null;
+                            const dSize     = !isLegacy ? parseInt(descHex.slice(144, 152), 16) : null;
+                            return (
+                            <div className={`col-span-2 rounded border p-3 text-sm ${
+                                previewThumbStatus === "warn"
+                                    ? "bg-red-50 border-red-300"
+                                    : previewThumbStatus === "ok"
+                                    ? "bg-green-50 border-green-300"
+                                    : "bg-blue-50 border-blue-200"
+                            }`}>
+                                <div className="flex items-center justify-between mb-1">
+                                    <p className="font-semibold text-gray-800">Extended Description (Circuit-verified)</p>
+                                    <span className={`text-xs px-2 py-0.5 rounded font-mono font-medium ${isLegacy ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800"}`}>
+                                        {descBytes}B {isLegacy ? "⚠ legacy — no d_thumb" : "✓ 76B"}
+                                    </span>
+                                </div>
+                                {/* Description fields */}
+                                <div className="font-mono text-xs text-gray-500 space-y-0.5 mb-2 bg-white/60 rounded p-2">
+                                    <p><span className="text-gray-400">d_sha  </span> {dShaHex.slice(0,32)}…</p>
+                                    {dThumbHex
+                                        ? <p><span className="text-gray-400">d_thumb</span> {dThumbHex.slice(0,32)}…</p>
+                                        : <p className="text-yellow-700">d_thumb: not committed (legacy 32B)</p>
+                                    }
+                                    {dWidth != null && <p><span className="text-gray-400">w×h    </span> {dWidth}×{dHeight} px · size {dSize?.toLocaleString()} B</p>}
+                                    {ext_img_thumb_hash && (
+                                        <p><span className="text-gray-400">listing </span> {ext_img_thumb_hash.replace(/^0x/,"").slice(0,32)}…</p>
+                                    )}
+                                    {dThumbHex && ext_img_thumb_hash && (
+                                        <p className={dThumbHex === ext_img_thumb_hash.replace(/^0x/,"") ? "text-green-700" : "text-red-700"}>
+                                            d_thumb vs listing: {dThumbHex === ext_img_thumb_hash.replace(/^0x/,"") ? "✓ match" : "✗ MISMATCH"}
+                                        </p>
+                                    )}
+                                </div>
+                                {/* d_thumb preview check */}
+                                <div className="flex items-start gap-2 text-xs mt-1">
+                                    <span className={`shrink-0 font-bold ${
+                                        previewThumbStatus === "checking" ? "text-blue-500" :
+                                        previewThumbStatus === "ok"       ? "text-green-700" :
+                                        previewThumbStatus === "warn"     ? "text-red-700" :
+                                        "text-gray-400"
+                                    }`}>
+                                        {previewThumbStatus === "checking" ? "…" :
+                                         previewThumbStatus === "ok"       ? "✓" :
+                                         previewThumbStatus === "warn"     ? "✗" :
+                                         !preview_image                    ? "N/A" : "·"}
+                                    </span>
+                                    <div>
+                                        <span className="font-medium text-gray-700">
+                                            SHA256(32×32 RGB of preview) == d_thumb
+                                        </span>
+                                        <span className="text-gray-500 ml-1">
+                                            {isLegacy ? "— cannot check (legacy 32B description)" :
+                                             !preview_image ? "— no preview image available" :
+                                             "— verified locally in your browser"}
+                                        </span>
+                                        {previewThumbStatus === "warn" && (
+                                            <p className="mt-1 font-semibold text-red-800">
+                                                ⚠ Preview does NOT match d_thumb — vendor uploaded a different image!
+                                            </p>
+                                        )}
+                                        {previewThumbStatus === "ok" && (
+                                            <p className="mt-0.5 text-green-700">
+                                                Preview matches committed d_thumb exactly.
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            );
+                        })()}
+
+                        {/* ZK / Quality Commitment Verification (default and zk only) */}
+                        {algorithm_suite !== "extended_image" && (
                         <div className={`col-span-2 rounded border p-3 text-sm ${
                             zkStatus === "invalid" ? "bg-red-50 border-red-300" :
                             zkStatus === "valid"   ? "bg-green-50 border-green-300" :
@@ -411,6 +549,7 @@ export default function NonAcceptedPrecontractModal({
                                 </p>
                             )}
                         </div>
+                        )}
                     </>
                 )}
 
@@ -435,7 +574,16 @@ export default function NonAcceptedPrecontractModal({
                 </div>
                 <div><strong>Timeout:</strong> {timeout_delay} s</div>
                 <div><strong>Protocol Version:</strong> {protocol_version}</div>
-                <div><strong>Algorithm:</strong> {algorithm_suite}</div>
+                <div>
+                    <strong>Algorithm:</strong>{" "}
+                    {algorithm_suite === "zk" ? (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1)</span>
+                    ) : algorithm_suite === "extended_image" ? (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc (BMP)</span>
+                    ) : (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">Hash Commitment</span>
+                    )}
+                </div>
 
                 {/* Commitment verification section */}
                 <div className="col-span-2 border-t border-gray-300 pt-4">
@@ -488,13 +636,18 @@ export default function NonAcceptedPrecontractModal({
                         label="Accept"
                         onClick={handleAccept}
                         width="1/2"
-                        isDisabled={zkStatus === "invalid"}
+                        isDisabled={zkStatus === "invalid" || previewThumbStatus === "warn"}
                     />
                     <Button label="Reject" onClick={handleReject} width="1/2" />
                 </div>
                 {zkStatus === "invalid" && (
                     <p className="col-span-2 text-xs text-red-700 font-medium text-center bg-red-50 border border-red-200 rounded p-2">
                         ⚠ Accept is blocked: quality commitment verification failed. {zkReason && `(${zkReason})`}
+                    </p>
+                )}
+                {previewThumbStatus === "warn" && (
+                    <p className="col-span-2 text-xs text-red-700 font-medium text-center bg-red-50 border border-red-200 rounded p-2">
+                        ⚠ Accept is blocked: the advertised preview does not match the committed description (d_thumb mismatch).
                     </p>
                 )}
             </div>

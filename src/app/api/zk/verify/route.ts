@@ -37,20 +37,20 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const { proof, proof_full, preview_hash, brisque, c_k, h_pt, thumbnail_hash } = body;
 
-        if (!proof || !c_k || brisque == null) {
+        if (!proof || brisque == null) {
             return NextResponse.json(
-                { valid: false, reason: "Missing required fields: proof, c_k, brisque" },
+                { valid: false, reason: "Missing required fields: proof, brisque" },
                 { status: 400 }
             );
         }
 
-        // If proof_full exists → this is a full SP1 Groth16 proof
+        // If proof_full exists → this is a full SP1 Groth16 proof (no c_k needed)
         if (proof_full && fs.existsSync(ZK_HOST_PATH)) {
             const tmpDir = path.join(process.cwd(), "tmp");
             if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
             const tmpJson = path.join(tmpDir, `zk_verify_${Date.now()}.json`);
             try {
-                const payload = { proof, proof_full, h_pt: h_pt ?? null, thumbnail_hash: thumbnail_hash ?? null, brisque, c_k };
+                const payload = { proof, proof_full, h_pt: h_pt ?? null, thumbnail_hash: thumbnail_hash ?? null, brisque };
                 fs.writeFileSync(tmpJson, JSON.stringify(payload));
                 const env = { ...process.env, SP1_PROVER: process.env.SP1_PROVER ?? "cpu" };
                 const { stdout } = await execFileAsync(
@@ -65,10 +65,10 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // Fallback: hash-based commitment verification
-        if (!preview_hash) {
+        // Fallback: hash-based commitment verification (requires c_k)
+        if (!c_k || !preview_hash) {
             return NextResponse.json(
-                { valid: false, reason: "preview_hash required for hash-commitment verification" },
+                { valid: false, reason: "c_k and preview_hash required for hash-commitment verification" },
                 { status: 400 }
             );
         }
