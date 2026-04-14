@@ -37,8 +37,18 @@ import init, {
     bytes_to_hex,
     check_received_ct_key,
     check_received_ct_key_extended_image_v2,
+    check_received_ct_key_extended_image_crop_v2,
+    check_received_ct_key_extended_image_dual_v2,
+    check_received_ct_key_extended_audio_v2,
+    check_received_ct_key_extended_audio_lowres_v2,
+    check_received_ct_key_extended_audio_both_v2,
     compile_circuit_v2_wasm,
     compile_circuit_extended_image_v2_wasm,
+    compile_circuit_extended_image_crop_v2_wasm,
+    compile_circuit_extended_image_dual_v2_wasm,
+    compile_circuit_extended_audio_v2_wasm,
+    compile_circuit_extended_audio_lowres_v2_wasm,
+    compile_circuit_extended_audio_both_v2_wasm,
     compute_proof_right_v2,
     compute_proofs_v2,
     compute_proofs_left_v2,
@@ -608,42 +618,59 @@ export default function OngoingContractModal({
         let success: boolean;
         let downloadBytes: Uint8Array;
         let downloadName: string;
-        const isExtImg = algorithm_suite === "extended_image";
-        // Use new extended-image check only when description is the 76-byte tuple (new contracts).
-        // Old contracts stored only SHA256(container) = 32 bytes → fall back to generic check.
-        const descBytesForCheck = isExtImg ? hex_to_bytes(item_description) : null;
-        const useExtImgCheck = isExtImg && descBytesForCheck !== null && descBytesForCheck.length === 76;
+        const isExtImg      = algorithm_suite === "extended_image";
+        const isExtImgCrop  = algorithm_suite === "extended_image_crop";
+        const isExtImgDual  = algorithm_suite === "extended_image_dual";
+        const isExtAudio     = algorithm_suite === "extended_audio";
+        const isExtAudioLow  = algorithm_suite === "extended_audio_lowres";
+        const isExtAudioBoth = algorithm_suite === "extended_audio_both";
+        const isAnyExtImg    = isExtImg || isExtImgCrop || isExtImgDual;
+        const isAnyExtAudio  = isExtAudio || isExtAudioLow || isExtAudioBoth;
+
+        const descBytesForCheck = (isAnyExtImg || isAnyExtAudio) ? hex_to_bytes(item_description) : null;
+        const descLen = descBytesForCheck?.length ?? 0;
         try {
-            const result = useExtImgCheck
-                ? check_received_ct_key_extended_image_v2(ct, hex_to_bytes(key), descBytesForCheck!)
-                : check_received_ct_key(ct, hex_to_bytes(key), item_description);
+            let result;
+            if      (isExtImg      && descLen === 76)  result = check_received_ct_key_extended_image_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtImgCrop  && descLen === 76)  result = check_received_ct_key_extended_image_crop_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtImgDual  && descLen === 108) result = check_received_ct_key_extended_image_dual_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtAudio    && descLen === 76)  result = check_received_ct_key_extended_audio_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtAudioLow && descLen === 76)  result = check_received_ct_key_extended_audio_lowres_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtAudioBoth && descLen === 108) result = check_received_ct_key_extended_audio_both_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else                                        result = check_received_ct_key(ct, hex_to_bytes(key), item_description);
             success = result.success;
-            // Strip SOX container header (64B) + thumbnail (3072B) to get canonical BMP bytes.
-            // Search for BMP signature "BM" (0x42 0x4D) in case the offset differs.
             const raw = result.decrypted_file;
-            if (isExtImg) {
+
+            if (isAnyExtImg) {
+                // Strip SOX image header to get the BMP bytes.
+                // extended_image:      header(64B) + thumb(196608B) → BMP at 196672
+                // extended_image_crop: header(64B) + crop(196608B)  → BMP at 196672
+                // extended_image_dual: header(64B) + thumb + crop   → BMP at 393280
+                const bmpOffset = isExtImgDual ? 393280 : 196672;
                 let bmpStart = -1;
-                // Check expected offset first, then scan up to 8192 bytes for "BM"
-                for (const off of [3136, 0, 64]) {
+                for (const off of [bmpOffset, 0, 64]) {
                     if (raw.length > off + 1 && raw[off] === 0x42 && raw[off + 1] === 0x4D) {
-                        bmpStart = off;
-                        break;
+                        bmpStart = off; break;
                     }
                 }
                 if (bmpStart === -1) {
-                    // Full scan as last resort
                     for (let i = 0; i < Math.min(raw.length - 1, 8192); i++) {
                         if (raw[i] === 0x42 && raw[i + 1] === 0x4D) { bmpStart = i; break; }
                     }
                 }
-                console.log("BMP signature found at offset:", bmpStart,
-                    "raw[0..8]:", Array.from(raw.slice(0, 8)).map(b => b.toString(16).padStart(2,"0")).join(" "));
                 downloadBytes = bmpStart >= 0 ? raw.slice(bmpStart) : raw;
+            } else if (isAnyExtAudio) {
+                // Strip SOX audio header to get original audio bytes.
+                // extended_audio:       header(64B) + preview(480000B)              → audio at 480064
+                // extended_audio_lowres: header(64B) + lowres(720000B)              → audio at 720064
+                // extended_audio_both:  header(64B) + preview(480000B) + lowres(720000B) → audio at 1200064
+                const audioOffset = isExtAudio ? 480_064 : isExtAudioLow ? 720_064 : 1_200_064;
+                downloadBytes = raw.length > audioOffset ? raw.slice(audioOffset) : raw;
             } else {
                 downloadBytes = raw;
             }
-            // Detect format from magic bytes when file_name is missing
-            const detectExt = (b: Uint8Array) => {
+
+            const detectImgExt = (b: Uint8Array) => {
                 if (b[0] === 0x42 && b[1] === 0x4D) return "bmp";
                 if (b[0] === 0xFF && b[1] === 0xD8) return "jpg";
                 if (b[0] === 0x89 && b[1] === 0x50) return "png";
@@ -651,8 +678,20 @@ export default function OngoingContractModal({
                 if (b[0] === 0x52 && b[4] === 0x57) return "webp";
                 return null;
             };
-            const detectedExt = isExtImg ? detectExt(downloadBytes) : null;
-            const fallbackName = detectedExt ? `image.${detectedExt}` : (isExtImg ? "image.png" : "decrypted_file");
+            const detectAudioExt = (b: Uint8Array) => {
+                if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return "mp3";
+                if (b[0] === 0xFF && (b[1] & 0xE0) === 0xE0) return "mp3";
+                if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) return "wav";
+                if (b[0] === 0x66 && b[1] === 0x4C && b[2] === 0x61 && b[3] === 0x43) return "flac";
+                if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return "m4a";
+                return null;
+            };
+            const detectedImgExt   = isAnyExtImg   ? detectImgExt(downloadBytes)   : null;
+            const detectedAudioExt = isAnyExtAudio ? detectAudioExt(downloadBytes) : null;
+            const fallbackName =
+                isAnyExtImg   ? (detectedImgExt   ? `image.${detectedImgExt}`   : "image.png") :
+                isAnyExtAudio ? (detectedAudioExt ? `audio.${detectedAudioExt}` : "audio.bin") :
+                "decrypted_file";
             downloadName = file_name || fallbackName;
         } catch {
             showToast("Fehler bei der Entschlüsselung.", "error");
@@ -667,7 +706,10 @@ export default function OngoingContractModal({
 
         // --- Download (async, separate from decryption error handling) ---
         try {
-            if (isExtImg && downloadBytes[0] === 0x42 && downloadBytes[1] === 0x4D) {
+            if (isAnyExtAudio) {
+                // Audio file: download directly in its native format
+                downloadFile(downloadBytes, downloadName);
+            } else if (isAnyExtImg && downloadBytes[0] === 0x42 && downloadBytes[1] === 0x4D) {
                 // Canonical 24-bit bottom-up BMP — decode manually (Safari has no BMP support)
                 const bmp = new Uint8Array(downloadBytes.length);
                 for (let i = 0; i < downloadBytes.length; i++) bmp[i] = downloadBytes[i];
@@ -1273,10 +1315,16 @@ export default function OngoingContractModal({
         }
 
         // Toujours compiler le circuit depuis le ciphertext (pas de sélection de circuit)
-        const _descBytesCircuit1 = algorithm_suite === "extended_image" ? hex_to_bytes(item_description) : null;
-        const circuit = algorithm_suite === "extended_image" && _descBytesCircuit1?.length === 76
-            ? compile_circuit_extended_image_v2_wasm(ct!, _descBytesCircuit1)
-            : compile_circuit_v2_wasm(ct!, item_description);
+        const _db1 = hex_to_bytes(item_description);
+        const circuit = (() => {
+            if (algorithm_suite === "extended_image"       && _db1.length === 76)  return compile_circuit_extended_image_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_image_crop"  && _db1.length === 76)  return compile_circuit_extended_image_crop_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_image_dual"  && _db1.length === 108) return compile_circuit_extended_image_dual_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_audio"       && _db1.length === 76)  return compile_circuit_extended_audio_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_audio_lowres" && _db1.length === 76) return compile_circuit_extended_audio_lowres_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_audio_both"  && _db1.length === 108) return compile_circuit_extended_audio_both_v2_wasm(ct!, _db1);
+            return compile_circuit_v2_wasm(ct!, item_description);
+        })();
 
         const evaluated_circuit = evaluate_circuit_v2_wasm(
             circuit,
@@ -1318,10 +1366,16 @@ export default function OngoingContractModal({
         }
 
         // Compiler le circuit automatiquement
-        const _descBytesCircuit2 = algorithm_suite === "extended_image" ? hex_to_bytes(item_description) : null;
-        const circuit = algorithm_suite === "extended_image" && _descBytesCircuit2?.length === 76
-            ? compile_circuit_extended_image_v2_wasm(ct, _descBytesCircuit2)
-            : compile_circuit_v2_wasm(ct, item_description);
+        const _db2 = hex_to_bytes(item_description);
+        const circuit = (() => {
+            if (algorithm_suite === "extended_image"        && _db2.length === 76)  return compile_circuit_extended_image_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_image_crop"   && _db2.length === 76)  return compile_circuit_extended_image_crop_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_image_dual"   && _db2.length === 108) return compile_circuit_extended_image_dual_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_audio"        && _db2.length === 76)  return compile_circuit_extended_audio_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_audio_lowres" && _db2.length === 76)  return compile_circuit_extended_audio_lowres_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_audio_both"   && _db2.length === 108) return compile_circuit_extended_audio_both_v2_wasm(ct, _db2);
+            return compile_circuit_v2_wasm(ct, item_description);
+        })();
 
         // Évaluer le circuit automatiquement avec la clé
         const evaluated_circuit = evaluate_circuit_v2_wasm(

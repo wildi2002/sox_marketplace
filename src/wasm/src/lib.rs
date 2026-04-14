@@ -14,8 +14,12 @@ use crate::circuits::{
     CompiledCircuit,
 };
 use crate::circuits_v2::{
-    compile_circuit_v2, compile_circuit_extended_image_v2,
-    evaluate_circuit_v2, CompiledCircuitV2, GateV2, ExtendedImageDesc,
+    compile_circuit_v2,
+    compile_circuit_extended_image_v2, compile_circuit_extended_image_crop_v2, compile_circuit_extended_image_dual_v2,
+    compile_circuit_extended_audio_v2, compile_circuit_extended_audio_lowres_v2, compile_circuit_extended_audio_both_v2,
+    evaluate_circuit_v2, CompiledCircuitV2, GateV2,
+    ExtendedImageDesc, ExtendedImageCropDesc, ExtendedImageDualDesc,
+    ExtendedAudioDesc, ExtendedAudioLowresDesc, ExtendedAudioBothDesc,
 };
 use crate::commitment::{commit_hashes, open_commitment_internal, Commitment};
 use crate::encryption::{decrypt, encrypt_and_prepend_iv};
@@ -231,6 +235,116 @@ pub fn check_precontract_native(
             NativeCheckPrecontractResult { success: false, h_circuit, h_ct }
         }
     }
+}
+
+// ####################################
+// ###   BUYER CHECK PRECONTRACT    ###
+// ###   (extended algorithm suites)###
+// ####################################
+
+/// Internal helper: given an already-compiled extended V2 circuit, verify the commitment.
+fn check_precontract_with_circuit_v2(
+    circuit: CompiledCircuitV2,
+    commitment: String,
+    opening_value: String,
+    ct: &[u8],
+) -> CheckPrecontractResult {
+    let h_ct = acc_ct(ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    match open_commitment_internal(&hex_to_bytes(commitment), &hex_to_bytes(opening_value)) {
+        Ok(opened) => {
+            let success = opened.len() == 64 && opened[..32].eq(&h_circuit) && opened[32..].eq(&h_ct);
+            CheckPrecontractResult { success, h_circuit, h_ct }
+        }
+        Err(msg) => {
+            error(msg);
+            CheckPrecontractResult { success: false, h_circuit, h_ct }
+        }
+    }
+}
+
+/// Verifies an extended-image V2 precontract commitment.
+/// description (hex) must encode 76 bytes: d_sha(32) || d_thumb(32) || w(4BE) || h(4BE) || size(4BE).
+#[wasm_bindgen]
+pub fn check_precontract_extended_image_v2(description: &[u8], commitment: String, opening_value: String, ct: &[u8]) -> CheckPrecontractResult {
+    if description.len() != 76 { crate::utils::die("Extended-image description must be 76 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_thumb = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_thumb.copy_from_slice(&description[32..64]);
+    let d_width  = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    let circuit = compile_circuit_extended_image_v2(ct, &ExtendedImageDesc { d_sha, d_thumb, d_width, d_height, d_format: 0, d_size });
+    check_precontract_with_circuit_v2(circuit, commitment, opening_value, ct)
+}
+
+/// Verifies an extended-image-crop V2 precontract commitment.
+/// description must be 76 bytes: d_sha(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE).
+#[wasm_bindgen]
+pub fn check_precontract_extended_image_crop_v2(description: &[u8], commitment: String, opening_value: String, ct: &[u8]) -> CheckPrecontractResult {
+    if description.len() != 76 { crate::utils::die("Extended-image-crop description must be 76 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_crop = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_crop.copy_from_slice(&description[32..64]);
+    let d_width  = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    let circuit = compile_circuit_extended_image_crop_v2(ct, &ExtendedImageCropDesc { d_sha, d_crop, d_width, d_height, d_size });
+    check_precontract_with_circuit_v2(circuit, commitment, opening_value, ct)
+}
+
+/// Verifies an extended-image-dual V2 precontract commitment.
+/// description must be 108 bytes: d_sha(32) || d_thumb(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE).
+#[wasm_bindgen]
+pub fn check_precontract_extended_image_dual_v2(description: &[u8], commitment: String, opening_value: String, ct: &[u8]) -> CheckPrecontractResult {
+    if description.len() != 108 { crate::utils::die("Extended-image-dual description must be 108 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_thumb = [0u8; 32]; let mut d_crop = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_thumb.copy_from_slice(&description[32..64]); d_crop.copy_from_slice(&description[64..96]);
+    let d_width  = u32::from_be_bytes(description[96..100].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[100..104].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[104..108].try_into().unwrap());
+    let circuit = compile_circuit_extended_image_dual_v2(ct, &ExtendedImageDualDesc { d_sha, d_thumb, d_crop, d_width, d_height, d_size });
+    check_precontract_with_circuit_v2(circuit, commitment, opening_value, ct)
+}
+
+/// Verifies an extended-audio V2 precontract commitment.
+/// description must be 76 bytes: d_sha(32) || d_preview(32) || duration(4BE) || bitrate(4BE) || size(4BE).
+#[wasm_bindgen]
+pub fn check_precontract_extended_audio_v2(description: &[u8], commitment: String, opening_value: String, ct: &[u8]) -> CheckPrecontractResult {
+    if description.len() != 76 { crate::utils::die("Extended-audio description must be 76 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_preview = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_preview.copy_from_slice(&description[32..64]);
+    let d_duration = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    let circuit = compile_circuit_extended_audio_v2(ct, &ExtendedAudioDesc { d_sha, d_preview, d_duration, d_bitrate, d_size });
+    check_precontract_with_circuit_v2(circuit, commitment, opening_value, ct)
+}
+
+/// Verifies an extended-audio-lowres V2 precontract commitment.
+/// description must be 76 bytes: d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE).
+#[wasm_bindgen]
+pub fn check_precontract_extended_audio_lowres_v2(description: &[u8], commitment: String, opening_value: String, ct: &[u8]) -> CheckPrecontractResult {
+    if description.len() != 76 { crate::utils::die("Extended-audio-lowres description must be 76 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_lowres = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_lowres.copy_from_slice(&description[32..64]);
+    let d_duration = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    let circuit = compile_circuit_extended_audio_lowres_v2(ct, &ExtendedAudioLowresDesc { d_sha, d_lowres, d_duration, d_bitrate, d_size });
+    check_precontract_with_circuit_v2(circuit, commitment, opening_value, ct)
+}
+
+/// Verifies an extended-audio-both V2 precontract commitment.
+/// description must be 108 bytes: d_sha(32) || d_preview(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE).
+#[wasm_bindgen]
+pub fn check_precontract_extended_audio_both_v2(description: &[u8], commitment: String, opening_value: String, ct: &[u8]) -> CheckPrecontractResult {
+    if description.len() != 108 { crate::utils::die("Extended-audio-both description must be 108 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_preview = [0u8; 32]; let mut d_lowres = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_preview.copy_from_slice(&description[32..64]); d_lowres.copy_from_slice(&description[64..96]);
+    let d_duration = u32::from_be_bytes(description[96..100].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[100..104].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[104..108].try_into().unwrap());
+    let circuit = compile_circuit_extended_audio_both_v2(ct, &ExtendedAudioBothDesc { d_sha, d_preview: d_preview, d_lowres: d_lowres, d_duration, d_bitrate, d_size });
+    check_precontract_with_circuit_v2(circuit, commitment, opening_value, ct)
 }
 
 // ####################################
@@ -771,14 +885,14 @@ pub fn compute_precontract_values_v2(file: &mut [u8], key: &[u8]) -> Precontract
 ///
 /// The ciphertext must wrap a BMP container:
 ///   bytes   0– 63: header (format 1B | size 4B | width 4B | height 4B | reserved 51B)
-///   bytes  64–3135: 32×32 raw-RGB thumbnail
-///   bytes 3136+  : BMP pixel data
+///   bytes  64–196671: 256×256 raw-RGB thumbnail
+///   bytes 196672+  : BMP pixel data
 ///
 /// # Arguments
 /// * `file`       - Plaintext file bytes (in BMP container format)
 /// * `key`        - AES-128 encryption key (16 bytes)
 /// * `d_sha`      - SHA256(file) — 32 bytes
-/// * `d_thumb`    - SHA256(thumbnail bytes 64..3136) — 32 bytes
+/// * `d_thumb`    - SHA256(thumbnail bytes 64..196672) — 32 bytes
 /// * `d_width`    - Image width in pixels
 /// * `d_height`   - Image height in pixels
 /// * `d_format`   - Format tag (0 = BMP)
@@ -881,8 +995,8 @@ pub fn check_received_ct_key_extended_image_v2(
     let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
 
     let sha_ok    = sha256(&decrypted).as_slice() == d_sha;
-    let thumb_ok  = decrypted.len() >= 3136
-        && sha256(&decrypted[64..3136]).as_slice() == d_thumb;
+    let thumb_ok  = decrypted.len() >= 196672
+        && sha256(&decrypted[64..196672]).as_slice() == d_thumb;
     let width_ok  = decrypted.len() >= 9
         && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_width;
     let height_ok = decrypted.len() >= 13
@@ -892,6 +1006,342 @@ pub fn check_received_ct_key_extended_image_v2(
 
     let success = sha_ok && thumb_ok && width_ok && height_ok && size_ok;
     CheckCtResult { success, decrypted_file: decrypted }
+}
+
+// ── Extended Audio WASM bindings ──────────────────────────────────────────────
+
+/// Computes precontract values for an audio file using the extended audio description circuit.
+///
+/// The plaintext must be a canonical audio container:
+///   bytes   0– 63  : header (format=0x01 | size 4B BE | duration_secs 4B BE | bitrate_kbps 4B BE | reserved 51B)
+///   bytes  64–480063: 30s × 8kHz mono Int16-LE PCM preview (480 000 bytes)
+///   bytes 480064+  : original audio file bytes
+///
+/// # Arguments
+/// * `file`       - Plaintext container bytes
+/// * `key`        - AES-128 key (16 bytes)
+/// * `d_sha`      - SHA256(file) — 32 bytes
+/// * `d_preview`  - SHA256(preview PCM bytes 64..480064) — 32 bytes
+/// * `d_duration` - Total duration in seconds
+/// * `d_bitrate`  - Encoding bitrate in kbps
+/// * `d_size`     - Container size in bytes
+#[wasm_bindgen]
+pub fn compute_precontract_extended_audio_v2(
+    file: &mut [u8],
+    key: &[u8],
+    d_sha: &[u8],
+    d_preview: &[u8],
+    d_duration: u32,
+    d_bitrate: u32,
+    d_size: u32,
+) -> Precontract {
+    let mut sha_arr = [0u8; 32];
+    let mut preview_arr = [0u8; 32];
+    sha_arr.copy_from_slice(&d_sha[..32]);
+    preview_arr.copy_from_slice(&d_preview[..32]);
+    let desc = ExtendedAudioDesc { d_sha: sha_arr, d_preview: preview_arr, d_duration, d_bitrate, d_size };
+
+    // description = d_sha(32) || d_preview(32) || d_duration(4 BE) || d_bitrate(4 BE) || d_size(4 BE)
+    let mut description = Vec::with_capacity(76);
+    description.extend_from_slice(&sha_arr);
+    description.extend_from_slice(&preview_arr);
+    description.extend_from_slice(&d_duration.to_be_bytes());
+    description.extend_from_slice(&d_bitrate.to_be_bytes());
+    description.extend_from_slice(&d_size.to_be_bytes());
+
+    let ct = encrypt_and_prepend_iv(file, key);
+    let circuit = compile_circuit_extended_audio_v2(&ct, &desc);
+    let num_blocks = circuit.num_blocks;
+    let num_gates = circuit.gates.len() as u32;
+    let circuit_bytes = circuit.to_bytes();
+    let h_ct = acc_ct(&ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    let commitment = commit_hashes(&h_circuit, &h_ct);
+
+    Precontract {
+        ct,
+        circuit_bytes,
+        description,
+        h_ct,
+        h_circuit,
+        commitment,
+        num_blocks,
+        num_gates,
+    }
+}
+
+/// Compiles an extended-audio V2 circuit from a 76-byte serialised description.
+#[wasm_bindgen]
+pub fn compile_circuit_extended_audio_v2_wasm(ct: &[u8], description: &[u8]) -> Vec<u8> {
+    if description.len() != 76 {
+        crate::utils::die("Extended-audio description must be exactly 76 bytes");
+    }
+    let mut d_sha = [0u8; 32];
+    let mut d_preview = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]);
+    d_preview.copy_from_slice(&description[32..64]);
+    let d_duration = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    let desc = ExtendedAudioDesc { d_sha, d_preview, d_duration, d_bitrate, d_size };
+    compile_circuit_extended_audio_v2(ct, &desc).to_bytes()
+}
+
+/// Decrypts a ciphertext and verifies all extended-audio description components.
+#[wasm_bindgen]
+pub fn check_received_ct_key_extended_audio_v2(
+    ct: &mut [u8],
+    key: &[u8],
+    description: &[u8],
+) -> CheckCtResult {
+    if description.len() != 76 {
+        crate::utils::die("Extended-audio description must be exactly 76 bytes");
+    }
+    let decrypted = decrypt(ct, key);
+
+    let d_sha      = &description[0..32];
+    let d_preview  = &description[32..64];
+    let d_duration = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[72..76].try_into().unwrap());
+
+    const PREVIEW_END: usize = 64 + 480_000; // 480_064
+    let sha_ok      = sha256(&decrypted).as_slice() == d_sha;
+    let preview_ok  = decrypted.len() >= PREVIEW_END
+        && sha256(&decrypted[64..PREVIEW_END]).as_slice() == d_preview;
+    let duration_ok = decrypted.len() >= 9
+        && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_duration;
+    let bitrate_ok  = decrypted.len() >= 13
+        && u32::from_be_bytes(decrypted[9..13].try_into().unwrap()) == d_bitrate;
+    let size_ok     = decrypted.len() >= 5
+        && u32::from_be_bytes(decrypted[1..5].try_into().unwrap()) == d_size;
+
+    let success = sha_ok && preview_ok && duration_ok && bitrate_ok && size_ok;
+    CheckCtResult { success, decrypted_file: decrypted }
+}
+
+// ── Extended Image: Crop ───────────────────────────────────────────────────────
+
+/// Computes precontract for a crop-preview image container (format 0x02).
+/// description = d_sha(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE) = 76 bytes.
+#[wasm_bindgen]
+pub fn compute_precontract_extended_image_crop_v2(
+    file: &mut [u8], key: &[u8],
+    d_sha: &[u8], d_crop: &[u8],
+    d_width: u32, d_height: u32, d_size: u32,
+) -> Precontract {
+    let mut sha_arr = [0u8; 32]; let mut crop_arr = [0u8; 32];
+    sha_arr.copy_from_slice(&d_sha[..32]); crop_arr.copy_from_slice(&d_crop[..32]);
+    let desc = ExtendedImageCropDesc { d_sha: sha_arr, d_crop: crop_arr, d_width, d_height, d_size };
+    let mut description = Vec::with_capacity(76);
+    description.extend_from_slice(&sha_arr); description.extend_from_slice(&crop_arr);
+    description.extend_from_slice(&d_width.to_be_bytes()); description.extend_from_slice(&d_height.to_be_bytes());
+    description.extend_from_slice(&d_size.to_be_bytes());
+    let ct = encrypt_and_prepend_iv(file, key);
+    let circuit = compile_circuit_extended_image_crop_v2(&ct, &desc);
+    let num_blocks = circuit.num_blocks; let num_gates = circuit.gates.len() as u32;
+    let circuit_bytes = circuit.to_bytes();
+    let h_ct = acc_ct(&ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    let commitment = commit_hashes(&h_circuit, &h_ct);
+    Precontract { ct, circuit_bytes, description, h_ct, h_circuit, commitment, num_blocks, num_gates }
+}
+
+#[wasm_bindgen]
+pub fn compile_circuit_extended_image_crop_v2_wasm(ct: &[u8], description: &[u8]) -> Vec<u8> {
+    if description.len() != 76 { crate::utils::die("Extended-image-crop description must be 76 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_crop = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_crop.copy_from_slice(&description[32..64]);
+    let d_width  = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    compile_circuit_extended_image_crop_v2(ct, &ExtendedImageCropDesc { d_sha, d_crop, d_width, d_height, d_size }).to_bytes()
+}
+
+#[wasm_bindgen]
+pub fn check_received_ct_key_extended_image_crop_v2(ct: &mut [u8], key: &[u8], description: &[u8]) -> CheckCtResult {
+    if description.len() != 76 { crate::utils::die("Extended-image-crop description must be 76 bytes"); }
+    let decrypted = decrypt(ct, key);
+    let d_sha = &description[0..32]; let d_crop = &description[32..64];
+    let d_width  = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    const CROP_END: usize = 64 + 196_608; // 196_672
+    let sha_ok    = sha256(&decrypted).as_slice() == d_sha;
+    let crop_ok   = decrypted.len() >= CROP_END && sha256(&decrypted[64..CROP_END]).as_slice() == d_crop;
+    let width_ok  = decrypted.len() >= 9  && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_width;
+    let height_ok = decrypted.len() >= 13 && u32::from_be_bytes(decrypted[9..13].try_into().unwrap()) == d_height;
+    let size_ok   = decrypted.len() >= 5  && u32::from_be_bytes(decrypted[1..5].try_into().unwrap()) == d_size;
+    CheckCtResult { success: sha_ok && crop_ok && width_ok && height_ok && size_ok, decrypted_file: decrypted }
+}
+
+// ── Extended Image: Dual (thumbnail + crop) ───────────────────────────────────
+
+/// Computes precontract for a dual-preview image container (format 0x03).
+/// description = d_sha(32) || d_thumb(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE) = 108 bytes.
+#[wasm_bindgen]
+pub fn compute_precontract_extended_image_dual_v2(
+    file: &mut [u8], key: &[u8],
+    d_sha: &[u8], d_thumb: &[u8], d_crop: &[u8],
+    d_width: u32, d_height: u32, d_size: u32,
+) -> Precontract {
+    let mut sha_arr = [0u8; 32]; let mut thumb_arr = [0u8; 32]; let mut crop_arr = [0u8; 32];
+    sha_arr.copy_from_slice(&d_sha[..32]); thumb_arr.copy_from_slice(&d_thumb[..32]); crop_arr.copy_from_slice(&d_crop[..32]);
+    let desc = ExtendedImageDualDesc { d_sha: sha_arr, d_thumb: thumb_arr, d_crop: crop_arr, d_width, d_height, d_size };
+    let mut description = Vec::with_capacity(108);
+    description.extend_from_slice(&sha_arr); description.extend_from_slice(&thumb_arr); description.extend_from_slice(&crop_arr);
+    description.extend_from_slice(&d_width.to_be_bytes()); description.extend_from_slice(&d_height.to_be_bytes());
+    description.extend_from_slice(&d_size.to_be_bytes());
+    let ct = encrypt_and_prepend_iv(file, key);
+    let circuit = compile_circuit_extended_image_dual_v2(&ct, &desc);
+    let num_blocks = circuit.num_blocks; let num_gates = circuit.gates.len() as u32;
+    let circuit_bytes = circuit.to_bytes();
+    let h_ct = acc_ct(&ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    let commitment = commit_hashes(&h_circuit, &h_ct);
+    Precontract { ct, circuit_bytes, description, h_ct, h_circuit, commitment, num_blocks, num_gates }
+}
+
+#[wasm_bindgen]
+pub fn compile_circuit_extended_image_dual_v2_wasm(ct: &[u8], description: &[u8]) -> Vec<u8> {
+    if description.len() != 108 { crate::utils::die("Extended-image-dual description must be 108 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_thumb = [0u8; 32]; let mut d_crop = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_thumb.copy_from_slice(&description[32..64]); d_crop.copy_from_slice(&description[64..96]);
+    let d_width  = u32::from_be_bytes(description[96..100].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[100..104].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[104..108].try_into().unwrap());
+    compile_circuit_extended_image_dual_v2(ct, &ExtendedImageDualDesc { d_sha, d_thumb, d_crop, d_width, d_height, d_size }).to_bytes()
+}
+
+#[wasm_bindgen]
+pub fn check_received_ct_key_extended_image_dual_v2(ct: &mut [u8], key: &[u8], description: &[u8]) -> CheckCtResult {
+    if description.len() != 108 { crate::utils::die("Extended-image-dual description must be 108 bytes"); }
+    let decrypted = decrypt(ct, key);
+    let d_sha = &description[0..32]; let d_thumb = &description[32..64]; let d_crop = &description[64..96];
+    let d_width  = u32::from_be_bytes(description[96..100].try_into().unwrap());
+    let d_height = u32::from_be_bytes(description[100..104].try_into().unwrap());
+    let d_size   = u32::from_be_bytes(description[104..108].try_into().unwrap());
+    const THUMB_END: usize = 64 + 196_608;         // 196_672
+    const CROP_END:  usize = 64 + 196_608 * 2;     // 393_280
+    let sha_ok    = sha256(&decrypted).as_slice() == d_sha;
+    let thumb_ok  = decrypted.len() >= THUMB_END && sha256(&decrypted[64..THUMB_END]).as_slice() == d_thumb;
+    let crop_ok   = decrypted.len() >= CROP_END  && sha256(&decrypted[THUMB_END..CROP_END]).as_slice() == d_crop;
+    let width_ok  = decrypted.len() >= 9  && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_width;
+    let height_ok = decrypted.len() >= 13 && u32::from_be_bytes(decrypted[9..13].try_into().unwrap()) == d_height;
+    let size_ok   = decrypted.len() >= 5  && u32::from_be_bytes(decrypted[1..5].try_into().unwrap()) == d_size;
+    CheckCtResult { success: sha_ok && thumb_ok && crop_ok && width_ok && height_ok && size_ok, decrypted_file: decrypted }
+}
+
+// ── Extended Audio: Low-res Full ──────────────────────────────────────────────
+
+/// Computes precontract for a low-res-full audio container (format 0x02).
+/// description = d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) = 76 bytes.
+#[wasm_bindgen]
+pub fn compute_precontract_extended_audio_lowres_v2(
+    file: &mut [u8], key: &[u8],
+    d_sha: &[u8], d_lowres: &[u8],
+    d_duration: u32, d_bitrate: u32, d_size: u32,
+) -> Precontract {
+    let mut sha_arr = [0u8; 32]; let mut lowres_arr = [0u8; 32];
+    sha_arr.copy_from_slice(&d_sha[..32]); lowres_arr.copy_from_slice(&d_lowres[..32]);
+    let desc = ExtendedAudioLowresDesc { d_sha: sha_arr, d_lowres: lowres_arr, d_duration, d_bitrate, d_size };
+    let mut description = Vec::with_capacity(76);
+    description.extend_from_slice(&sha_arr); description.extend_from_slice(&lowres_arr);
+    description.extend_from_slice(&d_duration.to_be_bytes()); description.extend_from_slice(&d_bitrate.to_be_bytes());
+    description.extend_from_slice(&d_size.to_be_bytes());
+    let ct = encrypt_and_prepend_iv(file, key);
+    let circuit = compile_circuit_extended_audio_lowres_v2(&ct, &desc);
+    let num_blocks = circuit.num_blocks; let num_gates = circuit.gates.len() as u32;
+    let circuit_bytes = circuit.to_bytes();
+    let h_ct = acc_ct(&ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    let commitment = commit_hashes(&h_circuit, &h_ct);
+    Precontract { ct, circuit_bytes, description, h_ct, h_circuit, commitment, num_blocks, num_gates }
+}
+
+#[wasm_bindgen]
+pub fn compile_circuit_extended_audio_lowres_v2_wasm(ct: &[u8], description: &[u8]) -> Vec<u8> {
+    if description.len() != 76 { crate::utils::die("Extended-audio-lowres description must be 76 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_lowres = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_lowres.copy_from_slice(&description[32..64]);
+    let d_duration = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    compile_circuit_extended_audio_lowres_v2(ct, &ExtendedAudioLowresDesc { d_sha, d_lowres, d_duration, d_bitrate, d_size }).to_bytes()
+}
+
+#[wasm_bindgen]
+pub fn check_received_ct_key_extended_audio_lowres_v2(ct: &mut [u8], key: &[u8], description: &[u8]) -> CheckCtResult {
+    if description.len() != 76 { crate::utils::die("Extended-audio-lowres description must be 76 bytes"); }
+    let decrypted = decrypt(ct, key);
+    let d_sha = &description[0..32]; let d_lowres = &description[32..64];
+    let d_duration = u32::from_be_bytes(description[64..68].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[68..72].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[72..76].try_into().unwrap());
+    const LOWRES_END: usize = 64 + 720_000; // 720_064
+    let sha_ok      = sha256(&decrypted).as_slice() == d_sha;
+    let lowres_ok   = decrypted.len() >= LOWRES_END && sha256(&decrypted[64..LOWRES_END]).as_slice() == d_lowres;
+    let duration_ok = decrypted.len() >= 9  && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_duration;
+    let bitrate_ok  = decrypted.len() >= 13 && u32::from_be_bytes(decrypted[9..13].try_into().unwrap()) == d_bitrate;
+    let size_ok     = decrypted.len() >= 5  && u32::from_be_bytes(decrypted[1..5].try_into().unwrap()) == d_size;
+    CheckCtResult { success: sha_ok && lowres_ok && duration_ok && bitrate_ok && size_ok, decrypted_file: decrypted }
+}
+
+// ── Extended Audio: Both (preview + low-res full) ─────────────────────────────
+
+/// Computes precontract for a both-audio container (format 0x03).
+/// description = d_sha(32) || d_preview(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) = 108 bytes.
+#[wasm_bindgen]
+pub fn compute_precontract_extended_audio_both_v2(
+    file: &mut [u8], key: &[u8],
+    d_sha: &[u8], d_preview: &[u8], d_lowres: &[u8],
+    d_duration: u32, d_bitrate: u32, d_size: u32,
+) -> Precontract {
+    let mut sha_arr = [0u8; 32]; let mut prev_arr = [0u8; 32]; let mut low_arr = [0u8; 32];
+    sha_arr.copy_from_slice(&d_sha[..32]); prev_arr.copy_from_slice(&d_preview[..32]); low_arr.copy_from_slice(&d_lowres[..32]);
+    let desc = ExtendedAudioBothDesc { d_sha: sha_arr, d_preview: prev_arr, d_lowres: low_arr, d_duration, d_bitrate, d_size };
+    let mut description = Vec::with_capacity(108);
+    description.extend_from_slice(&sha_arr); description.extend_from_slice(&prev_arr); description.extend_from_slice(&low_arr);
+    description.extend_from_slice(&d_duration.to_be_bytes()); description.extend_from_slice(&d_bitrate.to_be_bytes());
+    description.extend_from_slice(&d_size.to_be_bytes());
+    let ct = encrypt_and_prepend_iv(file, key);
+    let circuit = compile_circuit_extended_audio_both_v2(&ct, &desc);
+    let num_blocks = circuit.num_blocks; let num_gates = circuit.gates.len() as u32;
+    let circuit_bytes = circuit.to_bytes();
+    let h_ct = acc_ct(&ct, circuit.block_size as usize);
+    let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
+    let commitment = commit_hashes(&h_circuit, &h_ct);
+    Precontract { ct, circuit_bytes, description, h_ct, h_circuit, commitment, num_blocks, num_gates }
+}
+
+#[wasm_bindgen]
+pub fn compile_circuit_extended_audio_both_v2_wasm(ct: &[u8], description: &[u8]) -> Vec<u8> {
+    if description.len() != 108 { crate::utils::die("Extended-audio-both description must be 108 bytes"); }
+    let mut d_sha = [0u8; 32]; let mut d_prev = [0u8; 32]; let mut d_low = [0u8; 32];
+    d_sha.copy_from_slice(&description[0..32]); d_prev.copy_from_slice(&description[32..64]); d_low.copy_from_slice(&description[64..96]);
+    let d_duration = u32::from_be_bytes(description[96..100].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[100..104].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[104..108].try_into().unwrap());
+    compile_circuit_extended_audio_both_v2(ct, &ExtendedAudioBothDesc { d_sha, d_preview: d_prev, d_lowres: d_low, d_duration, d_bitrate, d_size }).to_bytes()
+}
+
+#[wasm_bindgen]
+pub fn check_received_ct_key_extended_audio_both_v2(ct: &mut [u8], key: &[u8], description: &[u8]) -> CheckCtResult {
+    if description.len() != 108 { crate::utils::die("Extended-audio-both description must be 108 bytes"); }
+    let decrypted = decrypt(ct, key);
+    let d_sha = &description[0..32]; let d_preview = &description[32..64]; let d_lowres = &description[64..96];
+    let d_duration = u32::from_be_bytes(description[96..100].try_into().unwrap());
+    let d_bitrate  = u32::from_be_bytes(description[100..104].try_into().unwrap());
+    let d_size     = u32::from_be_bytes(description[104..108].try_into().unwrap());
+    const PREV_END:  usize = 64 + 480_000;          // 480_064
+    const LOWRES_END: usize = 480_064 + 720_000;    // 1_200_064
+    let sha_ok      = sha256(&decrypted).as_slice() == d_sha;
+    let preview_ok  = decrypted.len() >= PREV_END   && sha256(&decrypted[64..PREV_END]).as_slice() == d_preview;
+    let lowres_ok   = decrypted.len() >= LOWRES_END && sha256(&decrypted[PREV_END..LOWRES_END]).as_slice() == d_lowres;
+    let duration_ok = decrypted.len() >= 9  && u32::from_be_bytes(decrypted[5..9].try_into().unwrap()) == d_duration;
+    let bitrate_ok  = decrypted.len() >= 13 && u32::from_be_bytes(decrypted[9..13].try_into().unwrap()) == d_bitrate;
+    let size_ok     = decrypted.len() >= 5  && u32::from_be_bytes(decrypted[1..5].try_into().unwrap()) == d_size;
+    CheckCtResult { success: sha_ok && preview_ok && lowres_ok && duration_ok && bitrate_ok && size_ok, decrypted_file: decrypted }
 }
 
 /// Represents an evaluated V2 circuit with its values.
@@ -1334,48 +1784,46 @@ pub fn compute_proof_right_v2(
     num_blocks: u32,
     num_gates: u32,
 ) -> Array {
-    use crate::utils::die;
+    use crate::utils::{die, error};
+
+    if num_gates == 0 {
+        die("compute_proof_right_v2: num_gates must be > 0");
+    }
+
     let evaluated = EvaluatedCircuitV2::from_bytes(evaluated_circuit_bytes);
 
-    // For V2, evaluated.values contains [inputs (num_blocks), gate_outputs (num_gates)]
-    // So gate outputs start at index num_blocks
-    let num_blocks_usize = num_blocks as usize;
-    if num_blocks_usize >= evaluated.values.len() {
+    let total_values = evaluated.values.len();
+
+    // gate_outputs = last num_gates values in evaluated.values
+    // We derive the actual block offset from total_values rather than trusting the DB num_blocks,
+    // since num_blocks in the DB may be stale or zero if not persisted correctly.
+    if total_values < num_gates as usize {
         die(&format!(
-            "num_blocks ({}) is greater than or equal to evaluated.values.len() ({})",
-            num_blocks_usize,
-            evaluated.values.len()
-        ));
-    }
-    
-    let gate_outputs = &evaluated.values[num_blocks_usize..];
-    if gate_outputs.is_empty() {
-        die("gate_outputs is empty");
-    }
-    
-    // Verify that gate_outputs length matches num_gates (should always be true)
-    // This is a sanity check to catch bugs early
-    if gate_outputs.len() != num_gates as usize {
-        die(&format!(
-            "Mismatch: gate_outputs.len() ({}) != num_gates ({})",
-            gate_outputs.len(),
+            "compute_proof_right_v2: evaluated circuit has {} values but num_gates={} — too few",
+            total_values,
             num_gates
         ));
     }
-    
+
+    // Compute actual num_blocks from total_values and num_gates
+    let actual_num_blocks = total_values - num_gates as usize;
+
+    // Warn if DB num_blocks disagrees (helps with debugging)
+    if actual_num_blocks != num_blocks as usize {
+        error(&format!(
+            "compute_proof_right_v2: DB num_blocks={} but actual={} (total_values={}, num_gates={}); using actual",
+            num_blocks, actual_num_blocks, total_values, num_gates
+        ));
+    }
+
+    let gate_outputs = &evaluated.values[actual_num_blocks..];
+
+    // gate_outputs.len() == num_gates by construction above
+
     // The last gate is at index num_gates - 1 (0-indexed in gate_outputs array)
     // This must match the index used in submitCommitmentRight: idxArr[0] = numGates - 1
     let last_gate_idx = (num_gates - 1) as u32;
-    
-    // Verify the index is valid
-    if last_gate_idx as usize >= gate_outputs.len() {
-        die(&format!(
-            "last_gate_idx ({}) is out of bounds for gate_outputs.len() ({})",
-            last_gate_idx,
-            gate_outputs.len()
-        ));
-    }
-    
+
     proof_to_js_array(prove(
         gate_outputs,
         &[last_gate_idx],

@@ -38,6 +38,23 @@ export type Contract = {
     ext_img_width?: number | null;
     ext_img_height?: number | null;
     ext_img_size?: number | null;
+    // Extended audio description fields
+    preview_audio?: string | null;
+    ext_audio_preview_hash?: string | null;
+    ext_audio_duration?: number | null;
+    ext_audio_bitrate?: number | null;
+    ext_audio_size?: number | null;
+    // Extended image crop/dual fields
+    preview_crop_image?: string | null;
+    ext_img_crop_hash?: string | null;
+    ext_img_crop_x?: number | null;
+    ext_img_crop_y?: number | null;
+    // Extended audio lowres/both fields
+    preview_audio_lowres?: string | null;
+    ext_audio_lowres_hash?: string | null;
+    // Audio sample rate fields
+    ext_audio_preview_sr?: number | null;
+    ext_audio_lowres_sr?: number | null;
 };
 
 interface NonAcceptedPrecontractsListViewProps {
@@ -100,7 +117,13 @@ export default function NonAcceptedPrecontractsListView({
                                 <td className="p-2">{c.id}</td>
                                 <td className="p-2 truncate">{c.pk_vendor}</td>
                                 <td className="p-2">
-                                    {c.zk_proof_full ? (
+                                    {c.algorithm_suite === "extended_audio" ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">
+                                            Audio{c.ext_audio_duration != null ? ` · ${c.ext_audio_duration}s` : ""}
+                                        </span>
+                                    ) : c.algorithm_suite === "extended_image" ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc</span>
+                                    ) : c.zk_proof_full ? (
                                         <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1)</span>
                                     ) : c.zk_proof ? (
                                         <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">Hash Commitment</span>

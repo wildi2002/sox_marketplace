@@ -115,18 +115,36 @@ export async function GET(req: NextRequest) {
         const rows = db.prepare(`SELECT * FROM contracts
             WHERE pk_buyer = ? AND accepted = 0`).all(pk) as any[];
 
-        // For extended_image contracts where preview_image is null, fall back to the
-        // listing's preview_image via the purchase_requests join.
+        // For extended_image / extended_audio contracts where the preview is null on the contract,
+        // fall back to the listing's preview fields via the purchase_requests join.
         const contracts = rows.map((c) => {
-            if (c.preview_image || c.algorithm_suite !== "extended_image") return c;
-            const listing = db.prepare(`
-                SELECT l.preview_image
-                FROM purchase_requests pr
-                JOIN listings l ON l.id = pr.listing_id
-                WHERE pr.contract_id = ?
-                LIMIT 1
-            `).get(c.id) as { preview_image: string | null } | undefined;
-            if (listing?.preview_image) return { ...c, preview_image: listing.preview_image };
+            if (c.algorithm_suite === "extended_image" && !c.preview_image) {
+                const listing = db.prepare(`
+                    SELECT l.preview_image
+                    FROM purchase_requests pr
+                    JOIN listings l ON l.id = pr.listing_id
+                    WHERE pr.contract_id = ? LIMIT 1
+                `).get(c.id) as { preview_image: string | null } | undefined;
+                if (listing?.preview_image) return { ...c, preview_image: listing.preview_image };
+            }
+            if ((c.algorithm_suite === "extended_audio" || c.algorithm_suite === "extended_audio_lowres" || c.algorithm_suite === "extended_audio_both") && !c.preview_audio) {
+                const listing = db.prepare(`
+                    SELECT l.preview_audio, l.preview_audio_lowres, l.ext_audio_lowres_hash
+                    FROM purchase_requests pr
+                    JOIN listings l ON l.id = pr.listing_id
+                    WHERE pr.contract_id = ? LIMIT 1
+                `).get(c.id) as { preview_audio: string | null; preview_audio_lowres: string | null; ext_audio_lowres_hash: string | null } | undefined;
+                if (listing) return { ...c, preview_audio: listing.preview_audio, preview_audio_lowres: listing.preview_audio_lowres, ext_audio_lowres_hash: listing.ext_audio_lowres_hash };
+            }
+            if ((c.algorithm_suite === "extended_image_crop" || c.algorithm_suite === "extended_image_dual") && !c.preview_crop_image) {
+                const listing = db.prepare(`
+                    SELECT l.preview_image, l.preview_crop_image, l.ext_img_crop_hash, l.ext_img_crop_x, l.ext_img_crop_y
+                    FROM purchase_requests pr
+                    JOIN listings l ON l.id = pr.listing_id
+                    WHERE pr.contract_id = ? LIMIT 1
+                `).get(c.id) as { preview_image: string | null; preview_crop_image: string | null; ext_img_crop_hash: string | null; ext_img_crop_x: number | null; ext_img_crop_y: number | null } | undefined;
+                if (listing) return { ...c, preview_image: listing.preview_image, preview_crop_image: listing.preview_crop_image, ext_img_crop_hash: listing.ext_img_crop_hash, ext_img_crop_x: listing.ext_img_crop_x, ext_img_crop_y: listing.ext_img_crop_y };
+            }
             return c;
         });
 
@@ -286,6 +304,19 @@ export async function PUT(req: Request) {
                 ext_img_width: data.ext_img_width ?? null,
                 ext_img_height: data.ext_img_height ?? null,
                 ext_img_size: data.ext_img_size ?? null,
+                preview_audio: data.preview_audio || null,
+                ext_audio_preview_hash: data.ext_audio_preview_hash || null,
+                ext_audio_duration: data.ext_audio_duration ?? null,
+                ext_audio_bitrate: data.ext_audio_bitrate ?? null,
+                ext_audio_size: data.ext_audio_size ?? null,
+                preview_crop_image: data.preview_crop_image || null,
+                ext_img_crop_hash: data.ext_img_crop_hash || null,
+                ext_img_crop_x: data.ext_img_crop_x ?? null,
+                ext_img_crop_y: data.ext_img_crop_y ?? null,
+                preview_audio_lowres: data.preview_audio_lowres || null,
+                ext_audio_lowres_hash: data.ext_audio_lowres_hash || null,
+                ext_audio_preview_sr: data.ext_audio_preview_sr ?? null,
+                ext_audio_lowres_sr: data.ext_audio_lowres_sr ?? null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -306,7 +337,11 @@ export async function PUT(req: Request) {
                 listing_type, preview_image, preview_hash, brisque_value,
                 zk_proof, zk_proof_full, zk_h_ct, zk_c_k, zk_thumbnail_hash, zk_brisque,
                 zk_h_pt, zk_vk_hash,
-                ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size
+                ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size,
+                preview_audio, ext_audio_preview_hash, ext_audio_duration, ext_audio_bitrate, ext_audio_size,
+                preview_crop_image, ext_img_crop_hash, ext_img_crop_x, ext_img_crop_y,
+                preview_audio_lowres, ext_audio_lowres_hash,
+                ext_audio_preview_sr, ext_audio_lowres_sr
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
@@ -316,7 +351,11 @@ export async function PUT(req: Request) {
                 ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?,
-                ?, ?, ?, ?
+                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?,
+                ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -348,7 +387,20 @@ export async function PUT(req: Request) {
                 contractData.ext_img_thumb_hash,
                 contractData.ext_img_width,
                 contractData.ext_img_height,
-                contractData.ext_img_size
+                contractData.ext_img_size,
+                contractData.preview_audio,
+                contractData.ext_audio_preview_hash,
+                contractData.ext_audio_duration,
+                contractData.ext_audio_bitrate,
+                contractData.ext_audio_size,
+                contractData.preview_crop_image,
+                contractData.ext_img_crop_hash,
+                contractData.ext_img_crop_x,
+                contractData.ext_img_crop_y,
+                contractData.preview_audio_lowres,
+                contractData.ext_audio_lowres_hash,
+                contractData.ext_audio_preview_sr,
+                contractData.ext_audio_lowres_sr,
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);

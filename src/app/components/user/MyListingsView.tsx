@@ -31,6 +31,19 @@ type Listing = {
     ext_img_width?: number | null;
     ext_img_height?: number | null;
     ext_img_size?: number | null;
+    preview_audio?: string | null;
+    ext_audio_preview_hash?: string | null;
+    ext_audio_duration?: number | null;
+    ext_audio_bitrate?: number | null;
+    ext_audio_size?: number | null;
+    preview_crop_image?: string | null;
+    ext_img_crop_hash?: string | null;
+    ext_img_crop_x?: number | null;
+    ext_img_crop_y?: number | null;
+    preview_audio_lowres?: string | null;
+    ext_audio_lowres_hash?: string | null;
+    ext_audio_preview_sr?: number | null;
+    ext_audio_lowres_sr?: number | null;
 };
 
 type PurchaseRequest = {
@@ -135,9 +148,27 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                                         </span>
                                     )
                                 ) : listing.listing_type === "image" && listing.algorithm_suite === "extended_image" ? (
-                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc (BMP)</span>
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Thumb (256×256)</span>
+                                ) : listing.listing_type === "image" && listing.algorithm_suite === "extended_image_crop" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Crop (native-res)</span>
+                                ) : listing.listing_type === "image" && listing.algorithm_suite === "extended_image_dual" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Thumb + Crop</span>
                                 ) : listing.listing_type === "image" ? (
                                     <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">Hash Commitment</span>
+                                ) : listing.listing_type === "audio" && listing.algorithm_suite === "extended_audio" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">
+                                        Audio preview{listing.ext_audio_duration != null ? ` · ${listing.ext_audio_duration}s` : ""}
+                                    </span>
+                                ) : listing.listing_type === "audio" && listing.algorithm_suite === "extended_audio_lowres" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">
+                                        Audio low-res{listing.ext_audio_duration != null ? ` · ${listing.ext_audio_duration}s` : ""}
+                                    </span>
+                                ) : listing.listing_type === "audio" && listing.algorithm_suite === "extended_audio_both" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">
+                                        Audio preview+lowres{listing.ext_audio_duration != null ? ` · ${listing.ext_audio_duration}s` : ""}
+                                    </span>
+                                ) : listing.listing_type === "audio" ? (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">Audio</span>
                                 ) : null}
                                 {listing.pending_requests > 0 && (
                                     <span className="ml-2 bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
@@ -257,6 +288,19 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                     listingExtImgWidth={fulfillTarget.listing.ext_img_width}
                     listingExtImgHeight={fulfillTarget.listing.ext_img_height}
                     listingExtImgSize={fulfillTarget.listing.ext_img_size}
+                    listingPreviewAudio={fulfillTarget.listing.preview_audio}
+                    listingExtAudioPreviewHash={fulfillTarget.listing.ext_audio_preview_hash}
+                    listingExtAudioDuration={fulfillTarget.listing.ext_audio_duration}
+                    listingExtAudioBitrate={fulfillTarget.listing.ext_audio_bitrate}
+                    listingExtAudioSize={fulfillTarget.listing.ext_audio_size}
+                    listingPreviewCropImage={fulfillTarget.listing.preview_crop_image}
+                    listingExtImgCropHash={fulfillTarget.listing.ext_img_crop_hash}
+                    listingExtImgCropX={fulfillTarget.listing.ext_img_crop_x}
+                    listingExtImgCropY={fulfillTarget.listing.ext_img_crop_y}
+                    listingPreviewAudioLowres={fulfillTarget.listing.preview_audio_lowres}
+                    listingExtAudioLowresHash={fulfillTarget.listing.ext_audio_lowres_hash}
+                    listingExtAudioPreviewSr={fulfillTarget.listing.ext_audio_preview_sr}
+                    listingExtAudioLowresSr={fulfillTarget.listing.ext_audio_lowres_sr}
                     onClose={() => {
                         setFulfillTarget(null);
                         if (expandedId !== null) fetchRequests(expandedId);

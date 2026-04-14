@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
             listing_type, preview_image, preview_hash, brisque_value,
             zk_proof, zk_proof_full, zk_h_pt, zk_thumbnail_hash, zk_brisque, zk_vk_hash,
             ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size,
+            preview_audio, ext_audio_preview_hash, ext_audio_duration, ext_audio_bitrate, ext_audio_size,
+            preview_crop_image, ext_img_crop_hash, ext_img_crop_x, ext_img_crop_y,
+            preview_audio_lowres, ext_audio_lowres_hash,
+            ext_audio_preview_sr, ext_audio_lowres_sr,
         } = body;
 
         if (!title || !price || !pk_vendor) {
@@ -41,8 +45,12 @@ export async function POST(req: NextRequest) {
             INSERT INTO listings (title, description, price, tip_completion, tip_dispute, timeout_delay, algorithm_suite, pk_vendor,
                 listing_type, preview_image, preview_hash, brisque_value,
                 zk_proof, zk_proof_full, zk_h_pt, zk_thumbnail_hash, zk_brisque, zk_vk_hash,
-                ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ext_img_thumb_hash, ext_img_width, ext_img_height, ext_img_size,
+                preview_audio, ext_audio_preview_hash, ext_audio_duration, ext_audio_bitrate, ext_audio_size,
+                preview_crop_image, ext_img_crop_hash, ext_img_crop_x, ext_img_crop_y,
+                preview_audio_lowres, ext_audio_lowres_hash,
+                ext_audio_preview_sr, ext_audio_lowres_sr)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             title,
             description || "",
@@ -66,6 +74,19 @@ export async function POST(req: NextRequest) {
             ext_img_width ?? null,
             ext_img_height ?? null,
             ext_img_size ?? null,
+            preview_audio ?? null,
+            ext_audio_preview_hash ?? null,
+            ext_audio_duration ?? null,
+            ext_audio_bitrate ?? null,
+            ext_audio_size ?? null,
+            preview_crop_image ?? null,
+            ext_img_crop_hash ?? null,
+            ext_img_crop_x ?? null,
+            ext_img_crop_y ?? null,
+            preview_audio_lowres ?? null,
+            ext_audio_lowres_hash ?? null,
+            ext_audio_preview_sr ?? null,
+            ext_audio_lowres_sr ?? null,
         );
 
         return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 });

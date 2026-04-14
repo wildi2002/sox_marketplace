@@ -33,6 +33,20 @@ export type Contract = {
     pk_sb?: string;
     pk_sv?: string;
     nextTimeout?: bigint;
+    // Extended audio fields
+    preview_audio?: string | null;
+    ext_audio_preview_hash?: string | null;
+    ext_audio_duration?: number | null;
+    ext_audio_bitrate?: number | null;
+    ext_audio_size?: number | null;
+    // Extended image crop/dual fields
+    preview_crop_image?: string | null;
+    ext_img_crop_hash?: string | null;
+    ext_img_crop_x?: number | null;
+    ext_img_crop_y?: number | null;
+    // Extended audio lowres/both fields
+    preview_audio_lowres?: string | null;
+    ext_audio_lowres_hash?: string | null;
 };
 
 /*

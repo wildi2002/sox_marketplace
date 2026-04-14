@@ -246,6 +246,63 @@ for (const col of [
         }
     }
 }
+// Extended audio description fields (algorithm_suite = 'extended_audio')
+for (const col of [
+    "preview_audio TEXT",
+    "ext_audio_preview_hash TEXT",
+    "ext_audio_duration INTEGER",
+    "ext_audio_bitrate INTEGER",
+    "ext_audio_size INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
+// Extended image crop/dual fields
+for (const col of [
+    "preview_crop_image TEXT",
+    "ext_img_crop_hash TEXT",
+    "ext_img_crop_x INTEGER",
+    "ext_img_crop_y INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
+// Extended audio lowres/both fields
+for (const col of [
+    "preview_audio_lowres TEXT",
+    "ext_audio_lowres_hash TEXT",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
+// Audio sample rate fields (preview native SR, lowres effective SR)
+for (const col of [
+    "ext_audio_preview_sr INTEGER",
+    "ext_audio_lowres_sr INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
 
 try {
     db.exec("ALTER TABLE contracts ADD COLUMN listing_type TEXT");
@@ -336,6 +393,62 @@ for (const col of [
     "ext_img_width INTEGER",
     "ext_img_height INTEGER",
     "ext_img_size INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
+    }
+}
+for (const col of [
+    "preview_audio TEXT",
+    "ext_audio_preview_hash TEXT",
+    "ext_audio_duration INTEGER",
+    "ext_audio_bitrate INTEGER",
+    "ext_audio_size INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
+    }
+}
+// Extended image crop/dual fields for contracts
+for (const col of [
+    "preview_crop_image TEXT",
+    "ext_img_crop_hash TEXT",
+    "ext_img_crop_x INTEGER",
+    "ext_img_crop_y INTEGER",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
+    }
+}
+// Extended audio lowres/both fields for contracts
+for (const col of [
+    "preview_audio_lowres TEXT",
+    "ext_audio_lowres_hash TEXT",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
+    }
+}
+// Audio sample rate fields for contracts
+for (const col of [
+    "ext_audio_preview_sr INTEGER",
+    "ext_audio_lowres_sr INTEGER",
 ]) {
     try {
         db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
