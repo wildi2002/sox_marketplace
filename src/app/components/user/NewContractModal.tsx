@@ -7,7 +7,7 @@ import FormTextField from "../common/FormTextField";
 import FormSelect from "../common/FormSelect";
 import FormFileInput from "../common/FormFileInput";
 import { isAddress } from "ethers";
-import initWasm, {
+import init, {
     compute_precontract_values_v2,
     compute_precontract_extended_image_v2,
     compute_precontract_extended_image_crop_v2,
@@ -15,10 +15,15 @@ import initWasm, {
     compute_precontract_extended_audio_v2,
     compute_precontract_extended_audio_lowres_v2,
     compute_precontract_extended_audio_both_v2,
+    compute_precontract_extended_video_v2,
+    compute_precontract_extended_video_clip_v2,
+    compute_precontract_extended_video_both_v2,
     bytes_to_hex,
 } from "@/app/lib/crypto_lib";
 import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
 import { useToast } from "@/app/lib/ToastContext";
+import { CANONICAL_FPS, canonicalVideoDims } from "@/app/lib/videoCanonical";
+import { hexToBytes } from "@/app/lib/helpers";
 
 // Browser-side hash commitment fallback when SP1 ZK proof is unavailable.
 // Computes proof = SHA256(preview_hash_bytes || brisque_float32_LE).
@@ -37,6 +42,265 @@ async function computeHashCommitment(previewHashHex: string, brisqueValue: numbe
     const hashBuf = await crypto.subtle.digest("SHA-256", combined);
     const proof = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
     return { proof, c_k: hex, thumbnail_hash: hex, brisque: brisqueValue };
+}
+
+// ── BMP pixel helpers (must match circuits_v2.rs BMP_PIXELS_START_IN_X = 118) ──
+
+/** Build canonical 24-bit bottom-up BMP bytes from any image file. */
+async function buildBmpBytesFromFile(imgFile: File): Promise<{ bmpBytes: Uint8Array; bmpWidth: number; bmpHeight: number }> {
+    const bmp = await createImageBitmap(imgFile);
+    const bW = bmp.width, bH = bmp.height;
+    const fc = new OffscreenCanvas(bW, bH);
+    (fc.getContext("2d") as OffscreenCanvasRenderingContext2D).drawImage(bmp, 0, 0);
+    bmp.close();
+    const px = (fc.getContext("2d") as OffscreenCanvasRenderingContext2D).getImageData(0, 0, bW, bH).data;
+    const rowSize = (bW * 3 + 3) & ~3;
+    const pixelSize = rowSize * bH;
+    const bmpBytes = new Uint8Array(54 + pixelSize);
+    const bv = new DataView(bmpBytes.buffer);
+    bmpBytes[0] = 0x42; bmpBytes[1] = 0x4D;
+    bv.setUint32(2, 54 + pixelSize, true); bv.setUint32(6, 0, true); bv.setUint32(10, 54, true);
+    bv.setUint32(14, 40, true); bv.setInt32(18, bW, true); bv.setInt32(22, bH, true);
+    bv.setUint16(26, 1, true); bv.setUint16(28, 24, true); bv.setUint32(30, 0, true);
+    bv.setUint32(34, pixelSize, true); bv.setInt32(38, 2835, true); bv.setInt32(42, 2835, true);
+    for (let y = 0; y < bH; y++) {
+        const srcY = bH - 1 - y;
+        for (let x = 0; x < bW; x++) {
+            const s = (srcY * bW + x) * 4, d = 54 + y * rowSize + x * 3;
+            bmpBytes[d] = px[s + 2]; bmpBytes[d + 1] = px[s + 1]; bmpBytes[d + 2] = px[s];
+        }
+    }
+    return { bmpBytes, bmpWidth: bW, bmpHeight: bH };
+}
+
+/** Extract 256×256 NN-downscaled BGR bytes from BMP — same algorithm as circuit. */
+function computeThumbBytesFromBmp(bmpBytes: Uint8Array, imgW: number, imgH: number): Uint8Array {
+    const rowStride = (imgW * 3 + 3) & ~3;
+    const out = new Uint8Array(256 * 256 * 3);
+    for (let oy = 0; oy < 256; oy++) {
+        for (let ox = 0; ox < 256; ox++) {
+            const sx = Math.floor(ox * imgW / 256);
+            const sy = Math.floor(oy * imgH / 256);
+            const bmpRow = imgH - 1 - sy;
+            const src = 54 + bmpRow * rowStride + sx * 3;
+            const dst = (oy * 256 + ox) * 3;
+            out[dst] = bmpBytes[src]; out[dst + 1] = bmpBytes[src + 1]; out[dst + 2] = bmpBytes[src + 2];
+        }
+    }
+    return out;
+}
+
+/** Extract 256×256 native-res BGR crop at (cropX, cropY) from BMP — same algorithm as circuit. */
+function computeCropBytesFromBmp(bmpBytes: Uint8Array, imgW: number, imgH: number, cropX: number, cropY: number): Uint8Array {
+    const rowStride = (imgW * 3 + 3) & ~3;
+    const out = new Uint8Array(256 * 256 * 3);
+    for (let ty = 0; ty < 256; ty++) {
+        for (let tx = 0; tx < 256; tx++) {
+            const sx = cropX + tx;
+            const sy = cropY + ty;
+            const bmpRow = imgH - 1 - sy;
+            const src = 54 + bmpRow * rowStride + sx * 3;
+            const dst = (ty * 256 + tx) * 3;
+            out[dst] = bmpBytes[src]; out[dst + 1] = bmpBytes[src + 1]; out[dst + 2] = bmpBytes[src + 2];
+        }
+    }
+    return out;
+}
+
+// ── Video container helpers (must match circuits_v2.rs layout) ──
+// Container: header(64B) || raw RGB24 frames || mono Int16-LE PCM
+// Header: tag(1) | size(4) | dur(4) | br(4) | W(4) | H(4) | fps(4) | sr(4) | n_samp(4) | reserved(27)
+
+/** Build canonical video container: header(64B) || all RGB24 frames || mono Int16-LE PCM.
+ *
+ * Frame extraction strategy:
+ *   - If requestVideoFrameCallback is available: play at rate = min(60/fps, 16) so each
+ *     display refresh captures exactly one target frame. Skipped frames (at high speeds)
+ *     are filled by repeating the previous captured frame.
+ *   - Fallback: sequential seek, one seek per frame (slow for high fps/long videos).
+ *
+ * Processing time ≈ duration × fps / 60  (e.g. 3 min @ 10 fps ≈ 30 s).
+ */
+async function buildVideoContainer(
+    file: File, w: number, h: number, fps: number, duration: number, bitrateKbps: number, tag: number,
+    onProgress?: (msg: string) => void,
+): Promise<Uint8Array> {
+    // ── Extract all RGB24 frames ──────────────────────────────────────────────
+    const totalFrames = Math.round(duration * fps);
+    const frameBytes  = w * h * 3;
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+    video.src = objectUrl;
+    video.muted = true;
+    await new Promise<void>((res, rej) => { video.onloadedmetadata = () => res(); video.onerror = rej as any; });
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    const allFramesBuf = new Uint8Array(totalFrames * frameBytes);
+
+    const writeFrame = (frameIdx: number) => {
+        const idata = ctx.getImageData(0, 0, w, h);
+        const base = frameIdx * frameBytes;
+        for (let p = 0; p < w * h; p++) {
+            allFramesBuf[base + p * 3]     = idata.data[p * 4];
+            allFramesBuf[base + p * 3 + 1] = idata.data[p * 4 + 1];
+            allFramesBuf[base + p * 3 + 2] = idata.data[p * 4 + 2];
+        }
+    };
+
+    // Seek to each target time so frame bytes match the listing's d_clip computation exactly.
+    // (rvfc/playback gives different decoded pixels than seek on the same frames.)
+    for (let f = 0; f < totalFrames; f++) {
+        video.currentTime = f / fps;
+        await new Promise<void>(r => { video.onseeked = () => r(); });
+        ctx.drawImage(video, 0, 0, w, h);
+        writeFrame(f);
+        onProgress?.(`Extracting video frames… ${f + 1}/${totalFrames}`);
+    }
+
+    URL.revokeObjectURL(objectUrl);
+
+    const yield_ = () => new Promise<void>(r => setTimeout(r, 0));
+
+    // ── Decode audio to mono Int16-LE PCM ─────────────────────────────────────
+    let sr = 44100;
+    let nSamp = 0;
+    let pcmBytes = new Uint8Array(0);
+    onProgress?.("Decoding audio…");
+    await yield_(); // let React render the status before the next blocking step
+    try {
+        const ab = await file.arrayBuffer();
+        const tempCtx = new AudioContext();
+        const audioBuffer = await tempCtx.decodeAudioData(ab);
+        await tempCtx.close();
+        sr = Math.min(audioBuffer.sampleRate, 96_000);
+        nSamp = Math.round(audioBuffer.duration * sr);
+        onProgress?.("Resampling audio…");
+        await yield_();
+        const offCtx = new OfflineAudioContext(1, nSamp, sr);
+        const src = offCtx.createBufferSource();
+        src.buffer = audioBuffer; src.connect(offCtx.destination); src.start(0);
+        const rendered = await offCtx.startRendering();
+        const ch = rendered.getChannelData(0);
+        onProgress?.("Converting audio to PCM…");
+        await yield_();
+        // Pad to the next multiple of AUDIO_LOWRES_SAMPLES so the Rust circuit's
+        // emit_audio_decimated_gates can access sample_idx * stride_k for all 240k
+        // indices without exceeding the container bounds.
+        const strideK = Math.max(1, Math.ceil(nSamp / AUDIO_LOWRES_SAMPLES));
+        const nSampPadded = AUDIO_LOWRES_SAMPLES * strideK;
+        const pcm = new Int16Array(nSampPadded); // zero-initialized; silence beyond nSamp
+        for (let i = 0; i < nSamp; i++)
+            pcm[i] = Math.max(-32768, Math.min(32767, Math.round(ch[i] * 32767)));
+        pcmBytes = new Uint8Array(pcm.buffer);
+        nSamp = nSampPadded; // header byte 29 must store padded count
+    } catch { /* no audio track */ }
+
+    // ── Assemble container ────────────────────────────────────────────────────
+    onProgress?.("Assembling container…");
+    await yield_();
+    // Pad frame data to 64-byte boundary so audio_start is block-aligned.
+    // compile_circuit_extended_video_both_v2 requires audio_start % 64 == 0.
+    const framePad = (64 - (allFramesBuf.length % 64)) % 64;
+    const paddedFrameLen = allFramesBuf.length + framePad;
+    const containerSize = 64 + paddedFrameLen + pcmBytes.length;
+    const container = new Uint8Array(containerSize);
+    const hdr = new DataView(container.buffer);
+    container[0] = tag;
+    hdr.setUint32(1,  containerSize, false);
+    hdr.setUint32(5,  duration,      false);
+    hdr.setUint32(9,  bitrateKbps,   false);
+    hdr.setUint32(13, w,             false);
+    hdr.setUint32(17, h,             false);
+    hdr.setUint32(21, fps,           false);
+    hdr.setUint32(25, sr,            false);
+    hdr.setUint32(29, nSamp,         false);
+    container.set(allFramesBuf, 64);
+    // zero-fill gap (already zero from new Uint8Array) ensures audio_start alignment
+    container.set(pcmBytes, 64 + paddedFrameLen);
+    return container;
+}
+
+/** Extract top-left min(256,w)×min(256,h) RGB24 bytes from video container frame 0.
+ *  Container layout: header(64B) || raw RGB24 frames top-down, no row padding.
+ *  Mirrors emit_video_thumb_gates in circuits_v2.rs. */
+function computeVideoThumbRgb(container: Uint8Array, w: number, h: number): Uint8Array {
+    const TW = 256, TH = 256;
+    const tw = Math.min(TW, w);
+    const th = Math.min(TH, h);
+    const out = new Uint8Array(TW * TH * 3);
+    for (let y = 0; y < th; y++) {
+        for (let x = 0; x < tw; x++) {
+            const src = 64 + (y * w + x) * 3;
+            const dst = (y * TW + x) * 3;
+            out[dst]     = container[src];
+            out[dst + 1] = container[src + 1];
+            out[dst + 2] = container[src + 2];
+        }
+    }
+    return out;
+}
+
+// ── Audio PCM helpers (must match circuits_v2.rs audio constants) ──
+// All audio variants: x = header(64B) || mono Int16 PCM at original sample rate.
+// Header bytes 13-16: sample rate; bytes 17-20: total samples.
+// d_crop  = SHA256(x[64..480064])              — first 240k samples, block-range
+// d_lowres = SHA256(decimated)                 — N=240k samples at stride K=⌈total/N⌉
+const AUDIO_CROP_SAMPLES   = 240_000; // fixed crop window (480 kB of PCM)
+const AUDIO_LOWRES_SAMPLES = 240_000; // fixed lowres output size (480 kB of PCM)
+
+/** Decode any audio file to mono Int16 PCM at original sample rate (≤96 kHz).
+ *  PCM is zero-padded to at least AUDIO_CROP_SAMPLES so d_crop is always defined.
+ *  Returns pcmBytes, sampleRate, and totalSamples for writing the header. */
+async function decodeToFullPcm(file: File): Promise<{
+    pcmBytes: Uint8Array;
+    sampleRate: number;
+    totalSamples: number;
+}> {
+    const ab = await file.arrayBuffer();
+    const tempCtx = new AudioContext();
+    const audioBuffer = await tempCtx.decodeAudioData(ab.slice(0));
+    await tempCtx.close();
+    const sampleRate    = Math.min(audioBuffer.sampleRate, 96_000);
+    const actualSamples = Math.round(audioBuffer.duration * sampleRate);
+    const nSamples      = Math.max(AUDIO_CROP_SAMPLES, actualSamples);
+    const offCtx = new OfflineAudioContext(1, actualSamples, sampleRate);
+    const src = offCtx.createBufferSource();
+    src.buffer = audioBuffer; src.connect(offCtx.destination); src.start(0);
+    const rendered = await offCtx.startRendering();
+    const ch = rendered.getChannelData(0);
+    const pcm = new Int16Array(nSamples); // zero-initialised — pads short audio
+    for (let i = 0; i < actualSamples; i++)
+        pcm[i] = Math.max(-32768, Math.min(32767, Math.round(ch[i] * 32767)));
+    return { pcmBytes: new Uint8Array(pcm.buffer), sampleRate, totalSamples: actualSamples };
+}
+
+/** Extract AUDIO_LOWRES_SAMPLES decimated Int16 samples from x = header||PCM.
+ *  stride K = ⌈total_samples / AUDIO_LOWRES_SAMPLES⌉ is read from header bytes 17-20.
+ *  Mirrors the circuit's GetByte gates at offset 64 + i·K·2. */
+function decimatePcmFromContainer(fileBytes: Uint8Array): Int16Array {
+    const hdr          = new DataView(fileBytes.buffer, fileBytes.byteOffset);
+    const totalSamples = hdr.getUint32(17, false); // big-endian
+    const strideK      = Math.ceil(totalSamples / AUDIO_LOWRES_SAMPLES);
+    const pcmSamples   = (fileBytes.length - 64) / 2;
+    const decimated    = new Int16Array(AUDIO_LOWRES_SAMPLES);
+    for (let i = 0; i < AUDIO_LOWRES_SAMPLES; i++) {
+        const srcIdx = Math.min(i * strideK, pcmSamples - 1);
+        decimated[i] = hdr.getInt16(64 + srcIdx * 2, true); // Int16 little-endian
+    }
+    return decimated;
+}
+
+// For video: audio starts at audioStart (= d_size - n_samp*2), not byte 64.
+function decimateVideoAudioFromContainer(fileBytes: Uint8Array, audioStart: number, nSamp: number): Int16Array {
+    const dv       = new DataView(fileBytes.buffer, fileBytes.byteOffset);
+    const strideK  = Math.max(1, Math.ceil(nSamp / AUDIO_LOWRES_SAMPLES));
+    const decimated = new Int16Array(AUDIO_LOWRES_SAMPLES);
+    for (let i = 0; i < AUDIO_LOWRES_SAMPLES; i++) {
+        const srcIdx = Math.min(i * strideK, nSamp - 1);
+        decimated[i] = dv.getInt16(audioStart + srcIdx * 2, true);
+    }
+    return decimated;
 }
 
 interface NewContractModalProps {
@@ -83,6 +347,27 @@ interface NewContractModalProps {
     // Sample rate fields
     listingExtAudioPreviewSr?: number | null;
     listingExtAudioLowresSr?: number | null;
+    // Extended video fields
+    listingPreviewVideoThumb?: string | null;
+    listingExtVideoThumbHash?: string | null;
+    listingPreviewVideoClip?: string | null;
+    listingExtVideoClipHash?: string | null;
+    listingExtVideoWidth?: number | null;
+    listingExtVideoHeight?: number | null;
+    listingExtVideoDuration?: number | null;
+    listingExtVideoBitrate?: number | null;
+    listingExtVideoSize?: number | null;
+    listingExtVideoFps?: number | null;
+    listingExtVideoClipFrames?: number | null;
+}
+
+function dataUrlToObjectUrl(dataUrl: string): string {
+    const comma = dataUrl.indexOf(",");
+    const mime  = dataUrl.slice(0, comma).match(/:(.*?);/)?.[1] ?? "video/webm";
+    const bin   = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
 const ALGORITHM_LABELS: Record<string, string> = {
@@ -93,6 +378,9 @@ const ALGORITHM_LABELS: Record<string, string> = {
     extended_audio: "Preview (native rate, cropped)",
     extended_audio_lowres: "Full Low-res (4kHz Int8, 3min)",
     extended_audio_both: "Preview + Low-res (both)",
+    extended_video: "Thumbnail (256×256, frame 0)",
+    extended_video_clip: "Clip (first N frames)",
+    extended_video_both: "Thumbnail + Clip (both)",
     zk: "ZK Proof (SP1, ~1h)",
 };
 
@@ -134,7 +422,33 @@ export default function NewContractModal({
     listingExtAudioLowresHash,
     listingExtAudioPreviewSr,
     listingExtAudioLowresSr,
+    listingPreviewVideoThumb,
+    listingExtVideoThumbHash,
+    listingPreviewVideoClip,
+    listingExtVideoClipHash,
+    listingExtVideoWidth,
+    listingExtVideoHeight,
+    listingExtVideoDuration,
+    listingExtVideoBitrate,
+    listingExtVideoSize,
+    listingExtVideoFps,
+    listingExtVideoClipFrames,
 }: NewContractModalProps) {
+    const [videoThumbBlobSrc, setVideoThumbBlobSrc] = useState<string | null>(null);
+    const [videoClipBlobSrc, setVideoClipBlobSrc]   = useState<string | null>(null);
+    useEffect(() => {
+        if (!listingPreviewVideoThumb) { setVideoThumbBlobSrc(null); return; }
+        const u = dataUrlToObjectUrl(listingPreviewVideoThumb);
+        setVideoThumbBlobSrc(u);
+        return () => URL.revokeObjectURL(u);
+    }, [listingPreviewVideoThumb]);
+    useEffect(() => {
+        if (!listingPreviewVideoClip) { setVideoClipBlobSrc(null); return; }
+        const u = dataUrlToObjectUrl(listingPreviewVideoClip);
+        setVideoClipBlobSrc(u);
+        return () => URL.revokeObjectURL(u);
+    }, [listingPreviewVideoClip]);
+
     const [buyerPk, setBuyerPk] = useState(prefillBuyerPk ?? "");
     const [price, setPrice] = useState(prefillPrice ?? "");
     const [tipCompletion, setTipCompletion] = useState(prefillTipCompletion ?? "");
@@ -147,7 +461,8 @@ export default function NewContractModal({
     const [descThumbStatus, setDescThumbStatus] = useState<"idle" | "checking" | "ok" | "warn">("idle");
     const [audioPreviewStatus, setAudioPreviewStatus] = useState<"idle" | "checking" | "ok" | "warn">("idle");
     const [isComputing, setIsComputing] = useState(false);
-    const isExtendedAlgo = algorithms === "extended_image" || algorithms === "extended_image_crop" || algorithms === "extended_image_dual" || algorithms === "extended_audio" || algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both";
+    const [computingProgress, setComputingProgress] = useState<string | null>(null);
+    const isExtendedAlgo = algorithms === "extended_image" || algorithms === "extended_image_crop" || algorithms === "extended_image_dual" || algorithms === "extended_audio" || algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both" || algorithms === "extended_video" || algorithms === "extended_video_clip" || algorithms === "extended_video_both";
     const ethChfRate = useEthChfRate();
     const { showToast } = useToast();
 
@@ -184,38 +499,9 @@ export default function NewContractModal({
         }
     }, []);
 
-    // For extended_image: automatically verify that the preview image shown to the buyer
-    // matches d_thumb (SHA256 of 256×256 RGB thumbnail) committed in the description.
-    // This runs once when the modal opens for an extended_image listing.
-    useEffect(() => {
-        if (algorithms !== "extended_image" || !listingPreviewImage || !listingExtImgThumbHash) return;
-        setDescThumbStatus("checking");
-        (async () => {
-            try {
-                const resp = await fetch(listingPreviewImage);
-                const blob = await resp.blob();
-                const bitmap = await createImageBitmap(blob);
-                const canvas = new OffscreenCanvas(256, 256);
-                const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
-                ctx.drawImage(bitmap, 0, 0, 256, 256);
-                bitmap.close();
-                const imgData = ctx.getImageData(0, 0, 256, 256);
-                const rgb = new Uint8Array(196608);
-                for (let i = 0; i < 65536; i++) {
-                    rgb[i * 3]     = imgData.data[i * 4];
-                    rgb[i * 3 + 1] = imgData.data[i * 4 + 1];
-                    rgb[i * 3 + 2] = imgData.data[i * 4 + 2];
-                }
-                const hashBuf = await crypto.subtle.digest("SHA-256", rgb);
-                const hash = Array.from(new Uint8Array(hashBuf))
-                    .map(b => b.toString(16).padStart(2, "0")).join("");
-                const expected = listingExtImgThumbHash.replace(/^0x/, "");
-                setDescThumbStatus(hash === expected ? "ok" : "warn");
-            } catch {
-                setDescThumbStatus("idle");
-            }
-        })();
-    }, [algorithms, listingPreviewImage, listingExtImgThumbHash]);
+    // Note: d_thumb is computed from BMP pixel data (NN, BGR, bottom-to-top rows) —
+    // the JPEG listing preview cannot be used to recompute the exact hash.
+    // The actual verification is done at the Rust WASM level in check_received_ct_key_*.
 
     // For extended_audio variants: verify SHA256 of PCM bytes in preview matches d_preview.
     useEffect(() => {
@@ -312,20 +598,10 @@ export default function NewContractModal({
             const f = files[0];
 
             if (algorithms === "extended_image" || algorithms === "extended_image_dual") {
-                // Compare SHA-256 of 256×256 scaled thumbnail
-                const bitmap = await createImageBitmap(f);
-                const tCanvas = new OffscreenCanvas(256, 256);
-                const tCtx = tCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
-                tCtx.drawImage(bitmap, 0, 0, 256, 256);
-                bitmap.close();
-                const imgData = tCtx.getImageData(0, 0, 256, 256);
-                const rgbBytes = new Uint8Array(196608);
-                for (let i = 0; i < 65536; i++) {
-                    rgbBytes[i * 3]     = imgData.data[i * 4];
-                    rgbBytes[i * 3 + 1] = imgData.data[i * 4 + 1];
-                    rgbBytes[i * 3 + 2] = imgData.data[i * 4 + 2];
-                }
-                const hashBuf = await crypto.subtle.digest("SHA-256", rgbBytes);
+                // Compare SHA-256 of NN-downscaled BGR thumbnail (BMP-based, matching circuit)
+                const { bmpBytes, bmpWidth, bmpHeight } = await buildBmpBytesFromFile(f);
+                const thumbBytes = computeThumbBytesFromBmp(bmpBytes, bmpWidth, bmpHeight);
+                const hashBuf = await crypto.subtle.digest("SHA-256", thumbBytes.buffer as ArrayBuffer);
                 const hash = Array.from(new Uint8Array(hashBuf))
                     .map((b) => b.toString(16).padStart(2, "0")).join("");
                 setImageHashStatus(hash === listingExtImgThumbHash ? "match" : "mismatch");
@@ -522,201 +798,99 @@ export default function NewContractModal({
             }
 
             setIsComputing(true);
-            await initWasm();
+
+            // Ensure WASM is compiled and ready before calling any crypto_lib function.
+            // Turbopack loads .wasm asynchronously so static imports are not sufficient.
+            await init();
 
             let fileBytes = new Uint8Array(await file[0].arrayBuffer());
             const key = crypto.getRandomValues(new Uint8Array(16));
 
-            // Helper: draw full image to canvas and build canonical 24-bit bottom-up BMP bytes
-            const buildBmpBytes = async (imgFile: File) => {
-                const bmp = await createImageBitmap(imgFile);
-                const bW = bmp.width, bH = bmp.height;
-                const fc = new OffscreenCanvas(bW, bH);
-                (fc.getContext("2d") as OffscreenCanvasRenderingContext2D).drawImage(bmp, 0, 0);
-                bmp.close();
-                const px = (fc.getContext("2d") as OffscreenCanvasRenderingContext2D).getImageData(0, 0, bW, bH).data;
-                const rowSize = (bW * 3 + 3) & ~3;
-                const pixelSize = rowSize * bH;
-                const bmpBytes = new Uint8Array(54 + pixelSize);
-                const bv = new DataView(bmpBytes.buffer);
-                bmpBytes[0] = 0x42; bmpBytes[1] = 0x4D;
-                bv.setUint32(2, 54 + pixelSize, true); bv.setUint32(6, 0, true); bv.setUint32(10, 54, true);
-                bv.setUint32(14, 40, true); bv.setInt32(18, bW, true); bv.setInt32(22, bH, true);
-                bv.setUint16(26, 1, true); bv.setUint16(28, 24, true); bv.setUint32(30, 0, true);
-                bv.setUint32(34, pixelSize, true); bv.setInt32(38, 2835, true); bv.setInt32(42, 2835, true);
-                for (let y = 0; y < bH; y++) {
-                    const srcY = bH - 1 - y;
-                    for (let x = 0; x < bW; x++) {
-                        const s = (srcY * bW + x) * 4, d = 54 + y * rowSize + x * 3;
-                        bmpBytes[d] = px[s + 2]; bmpBytes[d + 1] = px[s + 1]; bmpBytes[d + 2] = px[s];
-                    }
-                }
-                return { bmpBytes, bmpWidth: bW, bmpHeight: bH };
-            };
+            // Track BMP build result for later use in precontract hash computation.
+            let bmpBuildResult: { bmpBytes: Uint8Array; bmpWidth: number; bmpHeight: number } | null = null;
 
-            // Helper: extract 256×256 RGB pixels from image at (cropNX, cropNY)
-            const buildCropRgb = async (imgFile: File, cropNX: number, cropNY: number) => {
-                const bmp = await createImageBitmap(imgFile);
-                const canvas = new OffscreenCanvas(256, 256);
-                const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
-                const cropW = Math.min(256, bmp.width - cropNX);
-                const cropH = Math.min(256, bmp.height - cropNY);
-                ctx.drawImage(bmp, cropNX, cropNY, cropW, cropH, 0, 0, cropW, cropH);
-                bmp.close();
-                const imgData = ctx.getImageData(0, 0, 256, 256);
-                const rgbBytes = new Uint8Array(196608);
-                for (let i = 0; i < 65536; i++) {
-                    rgbBytes[i * 3]     = imgData.data[i * 4];
-                    rgbBytes[i * 3 + 1] = imgData.data[i * 4 + 1];
-                    rgbBytes[i * 3 + 2] = imgData.data[i * 4 + 2];
-                }
-                return rgbBytes;
-            };
-
-            // Helper: build 256×256 scaled thumbnail RGB
-            const buildThumbRgb = async (imgFile: File) => {
-                const bmp = await createImageBitmap(imgFile);
-                const tc = new OffscreenCanvas(256, 256);
-                (tc.getContext("2d") as OffscreenCanvasRenderingContext2D).drawImage(bmp, 0, 0, 256, 256);
-                bmp.close();
-                const imgData = (tc.getContext("2d") as OffscreenCanvasRenderingContext2D).getImageData(0, 0, 256, 256);
-                const rgbBytes = new Uint8Array(196608);
-                for (let i = 0; i < 65536; i++) {
-                    rgbBytes[i * 3]     = imgData.data[i * 4];
-                    rgbBytes[i * 3 + 1] = imgData.data[i * 4 + 1];
-                    rgbBytes[i * 3 + 2] = imgData.data[i * 4 + 2];
-                }
-                return rgbBytes;
-            };
-
-            // For extended_image: convert any image to canonical 24-bit BMP in the browser,
-            // then build the SOX container. The original file never leaves the browser unencrypted.
-            // SOX container: header(64B) | thumb(196608B, 256×256 RGB) | canonical BMP
+            // For extended_image: SOX container = header(64B) | canonical BMP
+            // d_thumb is computed below from BMP pixels (NN, BGR, bottom-to-top — same as circuit).
             if (algorithms === "extended_image") {
-                const { bmpBytes, bmpWidth, bmpHeight } = await buildBmpBytes(file[0]);
-                const thumbRgb = await buildThumbRgb(file[0]);
-                const containerSize = 64 + 196608 + bmpBytes.length;
+                bmpBuildResult = await buildBmpBytesFromFile(file[0]);
+                const { bmpBytes, bmpWidth, bmpHeight } = bmpBuildResult;
+                const containerSize = 64 + bmpBytes.length;
                 const container = new Uint8Array(containerSize);
                 const hView = new DataView(container.buffer);
                 container[0] = 0x00; hView.setUint32(1, containerSize, false);
                 hView.setUint32(5, bmpWidth, false); hView.setUint32(9, bmpHeight, false);
-                container.set(thumbRgb, 64); container.set(bmpBytes, 196672);
+                container.set(bmpBytes, 64);
                 fileBytes = container;
             }
 
-            // extended_image_crop: header(64B) | crop RGB(196608B, 256×256 native) | BMP
+            // extended_image_crop: header(64B) | BMP
             if (algorithms === "extended_image_crop") {
                 if (listingExtImgCropX == null || listingExtImgCropY == null) {
                     showToast("No crop region found in listing. Cannot build contract.", "error");
                     return;
                 }
-                const { bmpBytes, bmpWidth, bmpHeight } = await buildBmpBytes(file[0]);
-                const cropRgb = await buildCropRgb(file[0], listingExtImgCropX, listingExtImgCropY);
-                const containerSize = 64 + 196608 + bmpBytes.length;
+                bmpBuildResult = await buildBmpBytesFromFile(file[0]);
+                const { bmpBytes, bmpWidth, bmpHeight } = bmpBuildResult;
+                const containerSize = 64 + bmpBytes.length;
                 const container = new Uint8Array(containerSize);
                 const hView = new DataView(container.buffer);
                 container[0] = 0x02; hView.setUint32(1, containerSize, false);
                 hView.setUint32(5, bmpWidth, false); hView.setUint32(9, bmpHeight, false);
-                container.set(cropRgb, 64); container.set(bmpBytes, 196672);
+                container.set(bmpBytes, 64);
                 fileBytes = container;
             }
 
-            // extended_image_dual: header(64B) | thumb(196608B) | crop(196608B) | BMP
+            // extended_image_dual: header(64B) | BMP
             if (algorithms === "extended_image_dual") {
                 if (listingExtImgCropX == null || listingExtImgCropY == null) {
                     showToast("No crop region found in listing. Cannot build contract.", "error");
                     return;
                 }
-                const { bmpBytes, bmpWidth, bmpHeight } = await buildBmpBytes(file[0]);
-                const thumbRgb = await buildThumbRgb(file[0]);
-                const cropRgb = await buildCropRgb(file[0], listingExtImgCropX, listingExtImgCropY);
-                const containerSize = 64 + 196608 + 196608 + bmpBytes.length;
+                bmpBuildResult = await buildBmpBytesFromFile(file[0]);
+                const { bmpBytes, bmpWidth, bmpHeight } = bmpBuildResult;
+                const containerSize = 64 + bmpBytes.length;
                 const container = new Uint8Array(containerSize);
                 const hView = new DataView(container.buffer);
                 container[0] = 0x03; hView.setUint32(1, containerSize, false);
                 hView.setUint32(5, bmpWidth, false); hView.setUint32(9, bmpHeight, false);
-                container.set(thumbRgb, 64); container.set(cropRgb, 64 + 196608);
-                container.set(bmpBytes, 64 + 196608 + 196608);
+                container.set(bmpBytes, 64);
                 fileBytes = container;
             }
 
-            // Audio container helper: fetch WAV data URL, skip 44-byte header → raw PCM.
-            // Zero-pads to targetBytes if the WAV is shorter (preview may be shorter than
-            // the full circuit budget when original audio has a high sample rate).
-            // unsignedToSigned: WAV 8-bit is stored unsigned (+128 offset); undo to match
-            // the signed two's-complement bytes the listing hash was computed over.
-            const fetchPcm = async (wavDataUrl: string, targetBytes: number, unsignedToSigned = false) => {
-                const resp = await fetch(wavDataUrl);
-                const buf = await resp.arrayBuffer();
-                const raw = new Uint8Array(buf).slice(44);
-                const padded = new Uint8Array(targetBytes); // zero-initialised
-                const copyLen = Math.min(raw.length, targetBytes);
-                if (unsignedToSigned) {
-                    // WAV byte = (signed + 128); two's-complement of signed = (WAV + 128) & 0xFF
-                    for (let i = 0; i < copyLen; i++) padded[i] = (raw[i] + 128) & 0xFF;
-                } else {
-                    padded.set(raw.subarray(0, copyLen));
-                }
-                if (raw.length > targetBytes) throw new Error(`PCM too large: ${raw.length} > ${targetBytes}`);
-                return padded;
-            };
+            // All video variants: x = header(64B) || raw RGB24 frames || mono Int16-LE PCM.
+            // fps is capped at 10 so processing stays ≤ duration×10/60 seconds.
+            if (algorithms === "extended_video" || algorithms === "extended_video_clip" || algorithms === "extended_video_both") {
+                // Apply canonical dims — idempotent for new listings, caps old listings that
+                // stored original resolution and would cause OOM when building the container.
+                const { cW: vw, cH: vh } = canonicalVideoDims(
+                    listingExtVideoWidth  ?? 256,
+                    listingExtVideoHeight ?? 256,
+                );
+                const vfps = CANONICAL_FPS;
+                const vdur = listingExtVideoDuration ?? 0;
+                const vbr  = listingExtVideoBitrate  ?? 0;
+                const tag  = algorithms === "extended_video" ? 0x01 : algorithms === "extended_video_clip" ? 0x02 : 0x03;
+                fileBytes = await buildVideoContainer(file[0], vw, vh, vfps, vdur, vbr, tag,
+                    (msg) => setComputingProgress(msg),
+                ) as Uint8Array<ArrayBuffer>;
+                setComputingProgress(null);
+            }
 
-            // extended_audio: header(64B) | PCM preview(480,000B Int16) | original audio
-            if (algorithms === "extended_audio") {
-                if (!listingPreviewAudio) {
-                    showToast("No audio preview found in listing. Cannot build contract.", "error");
-                    return;
-                }
-                const pcmBytes = await fetchPcm(listingPreviewAudio, 480_000);
-                const origAudioBytes = fileBytes;
-                const containerSize = 64 + 480_000 + origAudioBytes.length;
+            // All audio variants: x = header(64B) || full mono Int16 PCM at original sample rate.
+            // Header bytes 13-16: sample rate; bytes 17-20: total samples (for circuit stride K).
+            if (algorithms === "extended_audio" || algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both") {
+                const { pcmBytes, sampleRate: audioSr, totalSamples } = await decodeToFullPcm(file[0]);
+                const containerSize = 64 + pcmBytes.length;
                 const container = new Uint8Array(containerSize);
                 const hView = new DataView(container.buffer);
-                container[0] = 0x01; hView.setUint32(1, containerSize, false);
-                hView.setUint32(5, listingExtAudioDuration ?? 0, false);
-                hView.setUint32(9, listingExtAudioBitrate ?? 0, false);
+                const tag = algorithms === "extended_audio" ? 0x01 : algorithms === "extended_audio_lowres" ? 0x02 : 0x03;
+                container[0] = tag;
+                hView.setUint32(1,  containerSize, false);
+                hView.setUint32(5,  listingExtAudioDuration ?? 0, false);
+                hView.setUint32(9,  listingExtAudioBitrate ?? 0, false);
+                hView.setUint32(13, audioSr, false);      // sample rate
+                hView.setUint32(17, totalSamples, false); // total samples → circuit derives K
                 container.set(pcmBytes, 64);
-                container.set(origAudioBytes, 64 + 480_000);
-                fileBytes = container;
-            }
-
-            // extended_audio_lowres: header(64B) | lowres PCM(720,000B Int8) | original audio
-            if (algorithms === "extended_audio_lowres") {
-                if (!listingPreviewAudioLowres) {
-                    showToast("No low-res audio found in listing. Cannot build contract.", "error");
-                    return;
-                }
-                const lowresBytes = await fetchPcm(listingPreviewAudioLowres, 720_000, true);
-                const origAudioBytes = fileBytes;
-                const containerSize = 64 + 720_000 + origAudioBytes.length;
-                const container = new Uint8Array(containerSize);
-                const hView = new DataView(container.buffer);
-                container[0] = 0x02; hView.setUint32(1, containerSize, false);
-                hView.setUint32(5, listingExtAudioDuration ?? 0, false);
-                hView.setUint32(9, listingExtAudioBitrate ?? 0, false);
-                container.set(lowresBytes, 64);
-                container.set(origAudioBytes, 64 + 720_000);
-                fileBytes = container;
-            }
-
-            // extended_audio_both: header(64B) | preview(480,000B) | lowres(720,000B) | original audio
-            if (algorithms === "extended_audio_both") {
-                if (!listingPreviewAudio || !listingPreviewAudioLowres) {
-                    showToast("No audio preview or low-res found in listing. Cannot build contract.", "error");
-                    return;
-                }
-                const pcmBytes    = await fetchPcm(listingPreviewAudio, 480_000);
-                const lowresBytes = await fetchPcm(listingPreviewAudioLowres, 720_000, true);
-                const origAudioBytes = fileBytes;
-                const containerSize = 64 + 480_000 + 720_000 + origAudioBytes.length;
-                const container = new Uint8Array(containerSize);
-                const hView = new DataView(container.buffer);
-                container[0] = 0x03; hView.setUint32(1, containerSize, false);
-                hView.setUint32(5, listingExtAudioDuration ?? 0, false);
-                hView.setUint32(9, listingExtAudioBitrate ?? 0, false);
-                container.set(pcmBytes, 64);
-                container.set(lowresBytes, 64 + 480_000);
-                container.set(origAudioBytes, 64 + 480_000 + 720_000);
                 fileBytes = container;
             }
 
@@ -725,42 +899,112 @@ export default function NewContractModal({
             const dSha = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes));
             const dSize = fileBytes.length;
             if (algorithms === "extended_image") {
-                const dThumb = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 196672)));
+                const { bmpBytes, bmpWidth, bmpHeight } = bmpBuildResult!;
+                const thumbBytes = computeThumbBytesFromBmp(bmpBytes, bmpWidth, bmpHeight);
+                const dThumb = new Uint8Array(await crypto.subtle.digest("SHA-256", thumbBytes.buffer as ArrayBuffer));
                 precontract = compute_precontract_extended_image_v2(
                     fileBytes, key, dSha, dThumb,
                     hdr.getUint32(5, false), hdr.getUint32(9, false), 0, dSize,
                 );
             } else if (algorithms === "extended_image_crop") {
-                const dCrop = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 196672)));
+                const { bmpBytes, bmpWidth, bmpHeight } = bmpBuildResult!;
+                const cropBytes = computeCropBytesFromBmp(bmpBytes, bmpWidth, bmpHeight, listingExtImgCropX!, listingExtImgCropY!);
+                const dCrop = new Uint8Array(await crypto.subtle.digest("SHA-256", cropBytes.buffer as ArrayBuffer));
                 precontract = compute_precontract_extended_image_crop_v2(
                     fileBytes, key, dSha, dCrop,
                     hdr.getUint32(5, false), hdr.getUint32(9, false), dSize,
+                    listingExtImgCropX!, listingExtImgCropY!,
                 );
             } else if (algorithms === "extended_image_dual") {
-                const dThumb = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 196672)));
-                const dCrop  = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(196672, 393280)));
+                const { bmpBytes, bmpWidth, bmpHeight } = bmpBuildResult!;
+                const thumbBytes = computeThumbBytesFromBmp(bmpBytes, bmpWidth, bmpHeight);
+                const cropBytes = computeCropBytesFromBmp(bmpBytes, bmpWidth, bmpHeight, listingExtImgCropX!, listingExtImgCropY!);
+                const dThumb = new Uint8Array(await crypto.subtle.digest("SHA-256", thumbBytes.buffer as ArrayBuffer));
+                const dCrop  = new Uint8Array(await crypto.subtle.digest("SHA-256", cropBytes.buffer as ArrayBuffer));
                 precontract = compute_precontract_extended_image_dual_v2(
                     fileBytes, key, dSha, dThumb, dCrop,
                     hdr.getUint32(5, false), hdr.getUint32(9, false), dSize,
+                    listingExtImgCropX!, listingExtImgCropY!,
                 );
             } else if (algorithms === "extended_audio") {
-                const dPreview = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 480064)));
+                const dCrop = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 64 + AUDIO_CROP_SAMPLES * 2)));
                 precontract = compute_precontract_extended_audio_v2(
-                    fileBytes, key, dSha, dPreview,
+                    fileBytes, key, dSha, dCrop,
                     hdr.getUint32(5, false), hdr.getUint32(9, false), dSize,
                 );
             } else if (algorithms === "extended_audio_lowres") {
-                const dLowres = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 720064)));
+                const decimated = decimatePcmFromContainer(fileBytes);
+                const dLowres = new Uint8Array(await crypto.subtle.digest("SHA-256", decimated.buffer as ArrayBuffer));
                 precontract = compute_precontract_extended_audio_lowres_v2(
                     fileBytes, key, dSha, dLowres,
                     hdr.getUint32(5, false), hdr.getUint32(9, false), dSize,
+                    hdr.getUint32(17, false), // total_samples — circuit derives stride K
                 );
             } else if (algorithms === "extended_audio_both") {
-                const dPreview = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 480064)));
-                const dLowres  = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(480064, 1200064)));
+                const dCrop = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(64, 64 + AUDIO_CROP_SAMPLES * 2)));
+                const decimated = decimatePcmFromContainer(fileBytes);
+                const dLowres  = new Uint8Array(await crypto.subtle.digest("SHA-256", decimated.buffer as ArrayBuffer));
                 precontract = compute_precontract_extended_audio_both_v2(
-                    fileBytes, key, dSha, dPreview, dLowres,
+                    fileBytes, key, dSha, dCrop, dLowres,
                     hdr.getUint32(5, false), hdr.getUint32(9, false), dSize,
+                    hdr.getUint32(17, false), // total_samples — circuit derives stride K
+                );
+            } else if (algorithms === "extended_video") {
+                const w = hdr.getUint32(13, false);
+                const h = hdr.getUint32(17, false);
+                const nSamp = hdr.getUint32(29, false);
+                const audioStart = dSize - nSamp * 2;
+                const thumbRgb = computeVideoThumbRgb(fileBytes, w, h);
+                const dThumb = new Uint8Array(await crypto.subtle.digest("SHA-256", thumbRgb.buffer as ArrayBuffer));
+                const decimated = decimateVideoAudioFromContainer(fileBytes, audioStart, nSamp);
+                const dLowres = new Uint8Array(await crypto.subtle.digest("SHA-256", decimated.buffer as ArrayBuffer));
+                precontract = compute_precontract_extended_video_v2(
+                    fileBytes, key, dSha, dThumb, dLowres,
+                    dSize, hdr.getUint32(5, false), hdr.getUint32(9, false), w, h, hdr.getUint32(21, false),
+                    hdr.getUint32(25, false), nSamp,
+                );
+            } else if (algorithms === "extended_video_clip") {
+                const w = hdr.getUint32(13, false);
+                const h = hdr.getUint32(17, false);
+                const nSamp = hdr.getUint32(29, false);
+                const audioStart = dSize - nSamp * 2;
+                const cropLen = Math.min(480000, nSamp * 2);
+                const clipFrames = listingExtVideoClipFrames ?? 0;
+                const clipBytes = fileBytes.slice(64, 64 + clipFrames * w * h * 3);
+                // Reuse the listing's clip hash so the precontract always matches what was advertised.
+                // Recomputing from the container risks non-deterministic canvas/GPU decoding differences.
+                const dClip = listingExtVideoClipHash
+                    ? hexToBytes(listingExtVideoClipHash)
+                    : new Uint8Array(await crypto.subtle.digest("SHA-256", clipBytes.buffer as ArrayBuffer));
+                const dCrop = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(audioStart, audioStart + cropLen).buffer as ArrayBuffer));
+                precontract = compute_precontract_extended_video_clip_v2(
+                    fileBytes, key, dSha, dClip, dCrop,
+                    dSize, hdr.getUint32(5, false), hdr.getUint32(9, false), w, h, hdr.getUint32(21, false),
+                    hdr.getUint32(25, false), nSamp,
+                    clipFrames,
+                );
+            } else if (algorithms === "extended_video_both") {
+                const w = hdr.getUint32(13, false);
+                const h = hdr.getUint32(17, false);
+                const nSamp = hdr.getUint32(29, false);
+                const audioStart = dSize - nSamp * 2;
+                const cropLen = Math.min(480000, nSamp * 2);
+                const clipFrames = listingExtVideoClipFrames ?? 0;
+                const thumbRgb = computeVideoThumbRgb(fileBytes, w, h);
+                const dThumb = new Uint8Array(await crypto.subtle.digest("SHA-256", thumbRgb.buffer as ArrayBuffer));
+                const clipBytes = fileBytes.slice(64, 64 + clipFrames * w * h * 3);
+                // Reuse the listing's clip hash so the precontract always matches what was advertised.
+                const dClip = listingExtVideoClipHash
+                    ? hexToBytes(listingExtVideoClipHash)
+                    : new Uint8Array(await crypto.subtle.digest("SHA-256", clipBytes.buffer as ArrayBuffer));
+                const decimated = decimateVideoAudioFromContainer(fileBytes, audioStart, nSamp);
+                const dLowres = new Uint8Array(await crypto.subtle.digest("SHA-256", decimated.buffer as ArrayBuffer));
+                const dCrop = new Uint8Array(await crypto.subtle.digest("SHA-256", fileBytes.slice(audioStart, audioStart + cropLen).buffer as ArrayBuffer));
+                precontract = compute_precontract_extended_video_both_v2(
+                    fileBytes, key, dSha, dThumb, dClip, dLowres, dCrop,
+                    dSize, hdr.getUint32(5, false), hdr.getUint32(9, false), w, h, hdr.getUint32(21, false),
+                    hdr.getUint32(25, false), nSamp,
+                    clipFrames,
                 );
             } else {
                 precontract = compute_precontract_values_v2(fileBytes, key);
@@ -826,6 +1070,19 @@ export default function NewContractModal({
                     ext_audio_lowres_hash: (algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both") ? listingExtAudioLowresHash ?? null : null,
                     ext_audio_preview_sr: (algorithms === "extended_audio" || algorithms === "extended_audio_both") ? listingExtAudioPreviewSr ?? null : null,
                     ext_audio_lowres_sr: (algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both") ? listingExtAudioLowresSr ?? null : null,
+                    preview_video_thumb: (algorithms === "extended_video" || algorithms === "extended_video_both") ? listingPreviewVideoThumb ?? null : null,
+                    ext_video_thumb_hash: (algorithms === "extended_video" || algorithms === "extended_video_both") ? listingExtVideoThumbHash ?? null : null,
+                    preview_video_clip: (algorithms === "extended_video_clip" || algorithms === "extended_video_both") ? listingPreviewVideoClip ?? null : null,
+                    ext_video_clip_hash: (algorithms === "extended_video_clip" || algorithms === "extended_video_both") ? listingExtVideoClipHash ?? null : null,
+                    ext_video_width: listingExtVideoWidth ?? null,
+                    ext_video_height: listingExtVideoHeight ?? null,
+                    ext_video_duration: listingExtVideoDuration ?? null,
+                    ext_video_bitrate: listingExtVideoBitrate ?? null,
+                    ext_video_size: listingExtVideoSize ?? null,
+                    ext_video_fps: listingExtVideoFps ?? null,
+                    ext_video_clip_frames: (algorithms === "extended_video_clip" || algorithms === "extended_video_both") ? listingExtVideoClipFrames ?? null : null,
+                    ext_video_sr: listingType === "video" ? (hdr?.getUint32(25, false) ?? null) : null,
+                    ext_video_n_samp: listingType === "video" ? (hdr?.getUint32(29, false) ?? null) : null,
                 }),
             });
 
@@ -991,6 +1248,7 @@ export default function NewContractModal({
                     options={
                         listingType === "image" ? ["default", "extended_image", "extended_image_crop", "extended_image_dual", "zk"] :
                         listingType === "audio" ? ["extended_audio", "extended_audio_lowres", "extended_audio_both"] :
+                        listingType === "video" ? ["extended_video", "extended_video_clip", "extended_video_both"] :
                         ["default"]
                     }
                     optionLabels={ALGORITHM_LABELS}
@@ -1023,12 +1281,12 @@ export default function NewContractModal({
                 )}
                 {(algorithms === "extended_audio" || algorithms === "extended_audio_both") && audioPreviewStatus === "ok" && (
                     <p className="col-span-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded p-2">
-                        ✓ Audio preview matches the committed description (d_preview verified).
+                        ✓ Audio crop preview matches the committed description (d_crop verified).
                     </p>
                 )}
                 {(algorithms === "extended_audio" || algorithms === "extended_audio_both") && audioPreviewStatus === "warn" && (
                     <div className="col-span-2 text-xs text-red-700 bg-red-50 border border-red-300 rounded p-3 font-medium">
-                        ⚠ Warning: The audio preview does NOT match the committed hash (d_preview mismatch). Do not accept this contract.
+                        ⚠ Warning: The audio crop preview does NOT match the committed hash (d_crop mismatch). Do not accept this contract.
                     </div>
                 )}
                 {(algorithms === "extended_audio" || algorithms === "extended_audio_both") && listingPreviewAudio && (
@@ -1046,6 +1304,25 @@ export default function NewContractModal({
                 {listingExtAudioDuration != null && (algorithms === "extended_audio" || algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both") && (
                     <p className="col-span-2 text-xs text-gray-400">
                         Duration: {listingExtAudioDuration}s · Bitrate: {listingExtAudioBitrate} kbps
+                    </p>
+                )}
+                {(algorithms === "extended_video" || algorithms === "extended_video_both") && videoThumbBlobSrc && (
+                    <div className="col-span-2">
+                        <p className="text-xs text-gray-500 mb-1">Thumbnail (whole film, low-res):</p>
+                        <video controls src={videoThumbBlobSrc} className="w-full max-h-48 rounded border border-gray-200 bg-black" preload="auto" />
+                        {listingExtVideoThumbHash && <p className="text-xs font-mono text-gray-400 mt-1">Thumb hash: {listingExtVideoThumbHash.slice(0, 16)}…</p>}
+                    </div>
+                )}
+                {(algorithms === "extended_video_clip" || algorithms === "extended_video_both") && videoClipBlobSrc && (
+                    <div className="col-span-2">
+                        <p className="text-xs text-gray-500 mb-1">Clip preview — first {listingExtVideoClipFrames} frames @ {listingExtVideoFps} fps:</p>
+                        <video controls src={videoClipBlobSrc} className="w-full max-h-48 rounded border border-gray-200 bg-black" preload="auto" />
+                        {listingExtVideoClipHash && <p className="text-xs font-mono text-gray-400 mt-1">Clip hash: {listingExtVideoClipHash.slice(0, 16)}…</p>}
+                    </div>
+                )}
+                {listingExtVideoWidth != null && (algorithms === "extended_video" || algorithms === "extended_video_clip" || algorithms === "extended_video_both") && (
+                    <p className="col-span-2 text-xs text-gray-400">
+                        Resolution: {listingExtVideoWidth}×{listingExtVideoHeight} · Duration: {listingExtVideoDuration}s · {listingExtVideoFps} fps · Bitrate: {listingExtVideoBitrate} kbps
                     </p>
                 )}
                 {(algorithms === "extended_image_crop" || algorithms === "extended_image_dual") && listingPreviewCropImage && (
@@ -1066,6 +1343,8 @@ export default function NewContractModal({
                                     ? "image/*"
                                     : listingType === "audio"
                                     ? "audio/*"
+                                    : listingType === "video"
+                                    ? "*/*"
                                     : undefined
                             }
                         >
@@ -1073,6 +1352,8 @@ export default function NewContractModal({
                                 ? "Image file (must match listing preview)"
                                 : listingType === "audio"
                                 ? "Audio file (full track to deliver)"
+                                : listingType === "video"
+                                ? "SOX video container (header + raw RGB24 frames)"
                                 : "File"}
                         </FormFileInput>
                         {listingType === "image" && imageHashStatus === "checking" && (
@@ -1127,7 +1408,7 @@ export default function NewContractModal({
 
                 <div className="col-span-2 flex gap-8">
                     <Button
-                        label={isComputing ? "Encrypting..." : "Submit"}
+                        label={isComputing ? (computingProgress ?? "Encrypting...") : "Submit"}
                         onClick={handleSubmit}
                         width="1/2"
                         isDisabled={isComputing}

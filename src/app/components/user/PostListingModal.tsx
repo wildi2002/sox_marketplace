@@ -1,29 +1,350 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import fixWebmDuration from "fix-webm-duration";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Modal from "../common/Modal";
 import Button from "../common/Button";
 import FormTextField from "../common/FormTextField";
 import FormSelect from "../common/FormSelect";
 import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
 import { useToast } from "@/app/lib/ToastContext";
+import { CANONICAL_FPS, canonicalVideoDims } from "@/app/lib/videoCanonical";
 
 interface PostListingModalProps {
     onClose: () => void;
     vendorPk: string;
 }
 
-type ListingType = "general" | "image" | "audio";
+type ListingType = "general" | "image" | "audio" | "video";
 
-// Fixed preview budget: 240 000 Int16 samples = 480 000 bytes (circuit constant).
-// Original sample rate is kept unchanged; duration = 240 000 / sampleRate.
-const AUDIO_PREVIEW_SAMPLES = 240_000;
-const AUDIO_PREVIEW_BYTES   = AUDIO_PREVIEW_SAMPLES * 2; // 480 000
+// Video thumbnail: top-left 256×256 RGB24 of frame 0, matching circuits_v2 emit_video_thumb_gates.
+const VIDEO_THUMB_W = 256;
+const VIDEO_THUMB_H = 256;
+const VIDEO_CLIP_SECONDS = 3; // default clip duration for extended_video_clip / _both
 
-// Fixed lowres budget: 720 000 Int8 samples (same circuit constant as Rust).
-// Sample rate adapts to cover the FULL duration — exactly like a 256×256 image
-// thumbnail (fixed byte budget, quality scales with content size).
-const AUDIO_LOWRES_BYTES    = 720_000;
+// ── Video preview encoding helpers ──────────────────────────────────────────
+
+function getBestWebMCodec(): string {
+    if (typeof MediaRecorder !== "undefined") {
+        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) return "video/webm;codecs=vp9";
+        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) return "video/webm;codecs=vp8";
+    }
+    return "video/webm";
+}
+
+function dataUrlToObjectUrl(dataUrl: string): string {
+    const comma = dataUrl.indexOf(",");
+    const mime  = dataUrl.slice(0, comma).match(/:(.*?);/)?.[1] ?? "video/webm";
+    const bin   = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+    });
+}
+
+/**
+ * Re-encodes the entire video at low resolution (~320px wide, 200 kbps VP9 WebM) with audio.
+ *
+ * Uses WebCodecs (VideoEncoder + AudioEncoder) + webm-muxer so that every frame
+ * gets a correct PTS — producing a proper full-duration file regardless of how
+ * fast we seek through the source.  Output fps is 5; audio is mono Opus 64 kbps.
+ *
+ * Falls back silently if VideoEncoder / AudioEncoder are unavailable (older browsers).
+ */
+async function encodeVideoLowRes(
+    src: string, origW: number, origH: number, dur: number,
+    audioBuffer: AudioBuffer | null,
+    onProgress?: (done: number, total: number) => void,
+): Promise<string> {
+    const scale  = Math.min(1, 320 / Math.max(origW, origH));
+    const outW   = Math.max(2, Math.round(origW * scale / 2) * 2);
+    const outH   = Math.max(2, Math.round(origH * scale / 2) * 2);
+    const OUT_FPS = 5;
+    const totalVideoFrames = Math.ceil(dur * OUT_FPS);
+
+    const { Muxer, ArrayBufferTarget } = await import("webm-muxer");
+
+    // ── Muxer ──────────────────────────────────────────────────────────────
+    const target = new ArrayBufferTarget();
+    const muxer = new Muxer({
+        target,
+        video: { codec: "V_VP9", width: outW, height: outH, frameRate: OUT_FPS },
+        audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
+        firstTimestampBehavior: "offset",
+    });
+
+    // ── Video encoder ───────────────────────────────────────────────────────
+    const videoEncoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta ?? undefined),
+        error: (e) => { throw e; },
+    });
+    videoEncoder.configure({
+        codec: "vp09.00.10.08",
+        width: outW, height: outH,
+        bitrate: 200_000,
+        framerate: OUT_FPS,
+        latencyMode: "quality",
+    });
+
+    // ── Audio encoder ───────────────────────────────────────────────────────
+    const OUT_SR = 48_000;
+    const audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => muxer.addAudioChunk(chunk, meta ?? undefined),
+        error: (e) => { throw e; },
+    });
+    audioEncoder.configure({
+        codec: "opus",
+        numberOfChannels: 1,
+        sampleRate: OUT_SR,
+        bitrate: 64_000,
+    });
+
+    // ── Video frames: seek to each frame and encode ─────────────────────────
+    const vid = document.createElement("video");
+    vid.src = src;
+    vid.muted = true;
+    await new Promise<void>((res, rej) => { vid.onloadedmetadata = () => res(); vid.onerror = rej as any; });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outW; canvas.height = outH;
+    const ctx = canvas.getContext("2d")!;
+
+    for (let fi = 0; fi < totalVideoFrames; fi++) {
+        const t = Math.min(fi / OUT_FPS, dur - 0.001);
+        // Set onseeked BEFORE currentTime to avoid the race where the event fires before the handler.
+        if (fi === 0 && vid.readyState >= 2) {
+            // Frame 0: video is already at t=0, no seek needed.
+        } else {
+            await new Promise<void>(r => { vid.onseeked = () => r(); vid.currentTime = t; });
+        }
+        ctx.drawImage(vid, 0, 0, outW, outH);
+        const frame = new VideoFrame(canvas, {
+            timestamp: Math.round(t * 1_000_000),
+            duration:  Math.round(1_000_000 / OUT_FPS),
+        });
+        videoEncoder.encode(frame, { keyFrame: fi % (OUT_FPS * 2) === 0 });
+        frame.close();
+        onProgress?.(fi + 1, totalVideoFrames);
+        // Yield to keep UI responsive between frame encodes.
+        await new Promise<void>(r => setTimeout(r, 0));
+    }
+
+    // ── Audio: resample the shared AudioBuffer (decoded once in processVideoFile) ──
+    if (audioBuffer) try {
+        // Resample to 48 kHz mono via OfflineAudioContext.
+        const offCtx = new OfflineAudioContext(1, Math.ceil(OUT_SR * audioBuffer.duration), OUT_SR);
+        const srcNode = offCtx.createBufferSource();
+        srcNode.buffer = audioBuffer;
+        srcNode.connect(offCtx.destination);
+        srcNode.start(0);
+        const rendered = await offCtx.startRendering();
+        const f32 = rendered.getChannelData(0);
+
+        // Feed audio in 20 ms chunks.
+        const CHUNK = Math.ceil(OUT_SR * 0.02);
+        for (let i = 0; i < f32.length; i += CHUNK) {
+            const slice = f32.slice(i, Math.min(i + CHUNK, f32.length));
+            const ad = new AudioData({
+                format: "f32",
+                sampleRate: OUT_SR,
+                numberOfFrames: slice.length,
+                numberOfChannels: 1,
+                timestamp: Math.round((i / OUT_SR) * 1_000_000),
+                data: slice,
+            });
+            audioEncoder.encode(ad);
+            ad.close();
+        }
+    } catch { /* silent if video has no audio track */ }
+
+    await videoEncoder.flush();
+    videoEncoder.close();
+    await audioEncoder.flush();
+    audioEncoder.close();
+    muxer.finalize();
+
+    return blobToDataUrl(new Blob([target.buffer], { type: "video/webm" }));
+}
+
+/**
+ * Re-encodes the first `clipSec` seconds at full resolution (VP9 ~5 Mbps + Opus 128 kbps).
+ * Uses WebCodecs + webm-muxer so frames get correct PTS and audio works without
+ * requiring an unmuted autoplay gesture.
+ */
+async function encodeVideoClip(src: string, origW: number, origH: number, clipSec: number, audioBuffer: AudioBuffer | null): Promise<string> {
+    const OUT_FPS = 30;
+    const totalFrames = Math.ceil(clipSec * OUT_FPS);
+
+    const { Muxer, ArrayBufferTarget } = await import("webm-muxer");
+    const target = new ArrayBufferTarget();
+    const muxer = new Muxer({
+        target,
+        video: { codec: "V_VP9", width: origW, height: origH, frameRate: OUT_FPS },
+        audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 },
+        firstTimestampBehavior: "offset",
+    });
+
+    const videoEncoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta ?? undefined),
+        error: (e) => { throw e; },
+    });
+    videoEncoder.configure({
+        codec: "vp09.00.10.08",
+        width: origW, height: origH,
+        bitrate: 5_000_000,
+        framerate: OUT_FPS,
+        latencyMode: "quality",
+    });
+
+    const OUT_SR = 48_000;
+    const audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => muxer.addAudioChunk(chunk, meta ?? undefined),
+        error: (e) => { throw e; },
+    });
+    audioEncoder.configure({ codec: "opus", numberOfChannels: 1, sampleRate: OUT_SR, bitrate: 128_000 });
+
+    // ── Video: seek to each frame in [0, clipSec) ─────────────────────────
+    const vid = document.createElement("video");
+    vid.src = src;
+    vid.muted = true;
+    await new Promise<void>((res, rej) => { vid.onloadedmetadata = () => res(); vid.onerror = rej as any; });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = origW; canvas.height = origH;
+    const ctx = canvas.getContext("2d")!;
+
+    for (let fi = 0; fi < totalFrames; fi++) {
+        const t = fi / OUT_FPS;
+        if (fi === 0 && vid.readyState >= 2) {
+            // already at t=0
+        } else {
+            await new Promise<void>(r => { vid.onseeked = () => r(); vid.currentTime = t; });
+        }
+        ctx.drawImage(vid, 0, 0, origW, origH);
+        const frame = new VideoFrame(canvas, {
+            timestamp: Math.round(t * 1_000_000),
+            duration:  Math.round(1_000_000 / OUT_FPS),
+        });
+        videoEncoder.encode(frame, { keyFrame: fi % (OUT_FPS * 2) === 0 });
+        frame.close();
+        await new Promise<void>(r => setTimeout(r, 0));
+    }
+
+    // ── Audio: first clipSec seconds from the shared AudioBuffer ─────────
+    if (audioBuffer) try {
+        const clipSamples = Math.ceil(OUT_SR * clipSec);
+        const offCtx = new OfflineAudioContext(1, clipSamples, OUT_SR);
+        const srcNode = offCtx.createBufferSource();
+        srcNode.buffer = audioBuffer;
+        srcNode.connect(offCtx.destination);
+        srcNode.start(0);
+        const rendered = await offCtx.startRendering();
+        const f32 = rendered.getChannelData(0);
+
+        const CHUNK = Math.ceil(OUT_SR * 0.02);
+        for (let i = 0; i < f32.length; i += CHUNK) {
+            const slice = f32.slice(i, Math.min(i + CHUNK, f32.length));
+            const ad = new AudioData({
+                format: "f32", sampleRate: OUT_SR,
+                numberOfFrames: slice.length, numberOfChannels: 1,
+                timestamp: Math.round((i / OUT_SR) * 1_000_000),
+                data: slice,
+            });
+            audioEncoder.encode(ad);
+            ad.close();
+        }
+    } catch { /* silent if no audio track */ }
+
+    await videoEncoder.flush();
+    videoEncoder.close();
+    await audioEncoder.flush();
+    audioEncoder.close();
+    muxer.finalize();
+
+    return blobToDataUrl(new Blob([target.buffer], { type: "video/webm" }));
+}
+
+// Fixed crop window: 240 000 Int16 samples = 480 000 bytes (circuit constant).
+// At 44.1 kHz ≈ 5.4 s; at 8 kHz ≈ 30 s — duration adapts naturally to source SR.
+const AUDIO_CROP_SAMPLES = 240_000;
+const AUDIO_CROP_BYTES   = AUDIO_CROP_SAMPLES * 2; // 480 000
+
+// Fixed lowres output: N = 240 000 Int16 samples regardless of audio length.
+// Stride K = ⌈total_samples / N⌉ — analogous to image NN thumbnail stride K_x/K_y.
+// Quality scales inversely with duration (longer audio → larger K → coarser lowres).
+const AUDIO_LOWRES_SAMPLES = 240_000;
+const AUDIO_LOWRES_BYTES   = AUDIO_LOWRES_SAMPLES * 2; // 480 000
+
+// ── BMP pixel helpers (must match circuits_v2.rs BMP_PIXELS_START_IN_X = 118) ──
+
+/** Build canonical 24-bit bottom-up BMP bytes from any image file. */
+async function buildBmpBytesFromFile(imgFile: File): Promise<{ bmpBytes: Uint8Array; bmpWidth: number; bmpHeight: number }> {
+    const bmp = await createImageBitmap(imgFile);
+    const bW = bmp.width, bH = bmp.height;
+    const fc = new OffscreenCanvas(bW, bH);
+    (fc.getContext("2d") as OffscreenCanvasRenderingContext2D).drawImage(bmp, 0, 0);
+    bmp.close();
+    const px = (fc.getContext("2d") as OffscreenCanvasRenderingContext2D).getImageData(0, 0, bW, bH).data;
+    const rowSize = (bW * 3 + 3) & ~3;
+    const pixelSize = rowSize * bH;
+    const bmpBytes = new Uint8Array(54 + pixelSize);
+    const bv = new DataView(bmpBytes.buffer);
+    bmpBytes[0] = 0x42; bmpBytes[1] = 0x4D;
+    bv.setUint32(2, 54 + pixelSize, true); bv.setUint32(6, 0, true); bv.setUint32(10, 54, true);
+    bv.setUint32(14, 40, true); bv.setInt32(18, bW, true); bv.setInt32(22, bH, true);
+    bv.setUint16(26, 1, true); bv.setUint16(28, 24, true); bv.setUint32(30, 0, true);
+    bv.setUint32(34, pixelSize, true); bv.setInt32(38, 2835, true); bv.setInt32(42, 2835, true);
+    for (let y = 0; y < bH; y++) {
+        const srcY = bH - 1 - y;
+        for (let x = 0; x < bW; x++) {
+            const s = (srcY * bW + x) * 4, d = 54 + y * rowSize + x * 3;
+            bmpBytes[d] = px[s + 2]; bmpBytes[d + 1] = px[s + 1]; bmpBytes[d + 2] = px[s];
+        }
+    }
+    return { bmpBytes, bmpWidth: bW, bmpHeight: bH };
+}
+
+/** Extract 256×256 NN-downscaled BGR bytes from BMP — same algorithm as circuit. */
+function computeThumbBytesFromBmp(bmpBytes: Uint8Array, imgW: number, imgH: number): Uint8Array {
+    const rowStride = (imgW * 3 + 3) & ~3;
+    const out = new Uint8Array(256 * 256 * 3);
+    for (let oy = 0; oy < 256; oy++) {
+        for (let ox = 0; ox < 256; ox++) {
+            const sx = Math.floor(ox * imgW / 256);
+            const sy = Math.floor(oy * imgH / 256);
+            const bmpRow = imgH - 1 - sy;
+            const src = 54 + bmpRow * rowStride + sx * 3;
+            const dst = (oy * 256 + ox) * 3;
+            out[dst] = bmpBytes[src]; out[dst + 1] = bmpBytes[src + 1]; out[dst + 2] = bmpBytes[src + 2];
+        }
+    }
+    return out;
+}
+
+/** Extract 256×256 native-res BGR crop at (cropX, cropY) from BMP — same algorithm as circuit. */
+function computeCropBytesFromBmp(bmpBytes: Uint8Array, imgW: number, imgH: number, cropX: number, cropY: number): Uint8Array {
+    const rowStride = (imgW * 3 + 3) & ~3;
+    const out = new Uint8Array(256 * 256 * 3);
+    for (let ty = 0; ty < 256; ty++) {
+        for (let tx = 0; tx < 256; tx++) {
+            const sx = cropX + tx;
+            const sy = cropY + ty;
+            const bmpRow = imgH - 1 - sy;
+            const src = 54 + bmpRow * rowStride + sx * 3;
+            const dst = (ty * 256 + tx) * 3;
+            out[dst] = bmpBytes[src]; out[dst + 1] = bmpBytes[src + 1]; out[dst + 2] = bmpBytes[src + 2];
+        }
+    }
+    return out;
+}
 
 /** Decode any audio file to a mono Int16-LE PCM preview at the ORIGINAL sample rate.
  *  Budget: 240 000 samples = 480 000 bytes (circuit constant).
@@ -48,7 +369,7 @@ async function buildAudioPreview(file: File): Promise<{
     // Keep the original sample rate — Web Audio supports up to 96 000 Hz.
     const sampleRate = Math.min(audioBuffer.sampleRate, 96_000);
     // Crop to however many samples fit in the budget (no padding for longer audio).
-    const actualSamples = Math.min(AUDIO_PREVIEW_SAMPLES, Math.round(audioBuffer.duration * sampleRate));
+    const actualSamples = Math.min(AUDIO_CROP_SAMPLES, Math.round(audioBuffer.duration * sampleRate));
 
     const offlineCtx = new OfflineAudioContext(1, actualSamples, sampleRate);
     const src = offlineCtx.createBufferSource();
@@ -58,8 +379,8 @@ async function buildAudioPreview(file: File): Promise<{
     const rendered = await offlineCtx.startRendering();
     const channelData = rendered.getChannelData(0);
 
-    // Container PCM: always AUDIO_PREVIEW_BYTES (zero-padded when audio is short).
-    const pcmInt16 = new Int16Array(AUDIO_PREVIEW_SAMPLES); // zero-initialised
+    // Container PCM: always AUDIO_CROP_BYTES (zero-padded when audio is short).
+    const pcmInt16 = new Int16Array(AUDIO_CROP_SAMPLES); // zero-initialised
     for (let i = 0; i < actualSamples; i++) {
         pcmInt16[i] = Math.max(-32768, Math.min(32767, Math.round(channelData[i] * 32767)));
     }
@@ -101,15 +422,51 @@ async function buildAudioPreview(file: File): Promise<{
     return { wavDataUrl, previewHash, durationSecs, bitrateKbps, pcmBytes, sampleRate };
 }
 
-/** Decode any audio file to a fixed 720 000-sample Int8 low-res version.
- *  The sample rate adapts so all 720 000 samples span the FULL original duration —
- *  same principle as the 256×256 image thumbnail (fixed byte budget, quality scales). */
+/** Decode file to full mono Int16 PCM and compute the decimated lowres hash.
+ *  Stride K = ⌈total_samples / AUDIO_LOWRES_SAMPLES⌉ is derived from the actual duration,
+ *  mirroring how the circuit reads K from the header field total_samples.
+ *  Returns the hash hex, K, total sample count, and original sample rate so the
+ *  caller can write the header fields for the canonical container. */
+async function pcmDecimatedHash(file: File): Promise<{
+    hash: string;
+    strideK: number;
+    totalSamples: number;
+    sampleRate: number;
+}> {
+    const ab = await file.arrayBuffer();
+    const tempCtx = new AudioContext();
+    const audioBuffer = await tempCtx.decodeAudioData(ab.slice(0));
+    await tempCtx.close();
+    const sampleRate    = Math.min(audioBuffer.sampleRate, 96_000);
+    const totalSamples  = Math.round(audioBuffer.duration * sampleRate);
+    const strideK       = Math.ceil(totalSamples / AUDIO_LOWRES_SAMPLES);
+    const offCtx = new OfflineAudioContext(1, totalSamples, sampleRate);
+    const src = offCtx.createBufferSource();
+    src.buffer = audioBuffer; src.connect(offCtx.destination); src.start(0);
+    const rendered = await offCtx.startRendering();
+    const ch = rendered.getChannelData(0);
+    // Full PCM
+    const fullPcm = new Int16Array(totalSamples);
+    for (let i = 0; i < totalSamples; i++)
+        fullPcm[i] = Math.max(-32768, Math.min(32767, Math.round(ch[i] * 32767)));
+    // Decimate: take every strideK-th sample — 1D NN downscaling
+    const decimated = new Int16Array(AUDIO_LOWRES_SAMPLES);
+    for (let i = 0; i < AUDIO_LOWRES_SAMPLES; i++)
+        decimated[i] = fullPcm[Math.min(i * strideK, totalSamples - 1)];
+    const hashBuf = await crypto.subtle.digest("SHA-256", decimated.buffer);
+    const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    return { hash, strideK, totalSamples, sampleRate };
+}
+
+/** Decode any audio file to a 4 kHz Int8 WAV for browser playback preview.
+ *  The returned wavDataUrl is for listening only — NOT for hash commitment.
+ *  d_lowres is computed separately via pcmDecimatedHash (1D NN decimation). */
 async function buildLowresAudio(file: File): Promise<{
     wavDataUrl: string;
-    lowresHash: string;
     durationSecs: number;
     bitrateKbps: number;
     effectiveSampleRate: number;
+    originalSampleRate: number;
 }> {
     const arrayBuffer = await file.arrayBuffer();
     const tempCtx = new AudioContext();
@@ -118,15 +475,11 @@ async function buildLowresAudio(file: File): Promise<{
 
     const durationSecs = audioBuffer.duration;
     const bitrateKbps  = Math.round((file.size * 8) / durationSecs / 1000);
+    const originalSampleRate = Math.min(audioBuffer.sampleRate, 96_000);
 
-    // Adaptive sample rate: capped at 4 000 Hz (very low quality ceiling).
-    // Minimum 200 Hz for very long tracks.
     const effectiveSampleRate = Math.max(200, Math.min(4_000, Math.round(AUDIO_LOWRES_BYTES / durationSecs)));
-
-    // Actual samples needed to cover the full duration at this rate (may be < AUDIO_LOWRES_BYTES).
     const actualSamples = Math.min(AUDIO_LOWRES_BYTES, Math.round(durationSecs * effectiveSampleRate));
 
-    // Render only as many samples as the audio actually has.
     const offlineCtx = new OfflineAudioContext(1, actualSamples, effectiveSampleRate);
     const src = offlineCtx.createBufferSource();
     src.buffer = audioBuffer;
@@ -135,17 +488,10 @@ async function buildLowresAudio(file: File): Promise<{
     const rendered = await offlineCtx.startRendering();
     const channelData = rendered.getChannelData(0);
 
-    // Container PCM: always exactly AUDIO_LOWRES_BYTES bytes (zero-padded for short tracks).
-    // The circuit verifies SHA256 over all 720 000 bytes at fixed offset 64.
     const pcmInt8 = new Int8Array(AUDIO_LOWRES_BYTES); // zero-initialised
     for (let i = 0; i < actualSamples; i++) {
         pcmInt8[i] = Math.max(-128, Math.min(127, Math.round(channelData[i] * 127)));
     }
-    const pcmBytes = new Uint8Array(pcmInt8.buffer);
-
-    const hashBuf = await crypto.subtle.digest("SHA-256", pcmBytes);
-    const lowresHash = Array.from(new Uint8Array(hashBuf))
-        .map(b => b.toString(16).padStart(2, "0")).join("");
 
     // WAV for browser preview: only actualSamples bytes (no trailing silence).
     const wavBuf = new ArrayBuffer(44 + actualSamples);
@@ -177,7 +523,7 @@ async function buildLowresAudio(file: File): Promise<{
         reader.readAsDataURL(wavBlob);
     });
 
-    return { wavDataUrl, lowresHash, durationSecs, bitrateKbps, effectiveSampleRate };
+    return { wavDataUrl, durationSecs, bitrateKbps, effectiveSampleRate, originalSampleRate };
 }
 
 // Downscale any image (given as data URL) to max 400px for upload as public thumbnail.
@@ -267,7 +613,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [listingType, setListingType] = useState<ListingType>("general");
     const handleListingTypeChange = (type: ListingType) => {
         setListingType(type);
-        setAlgorithms(type === "image" ? "default" : type === "audio" ? "extended_audio" : "default");
+        setAlgorithms(type === "image" ? "default" : type === "audio" ? "extended_audio" : type === "video" ? "extended_video" : "default");
         setSelectedFile(null);
         setSelectedImageDataUrl(null);
         setPreviewDataUrl(null);
@@ -292,6 +638,17 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setCropY(null);
         setCropBoxX(0);
         setCropBoxY(0);
+        setVideoThumbDataUrl(null);
+        setVideoThumbHash(null);
+        setVideoClipDataUrl(null);
+        setVideoClipHash(null);
+        setVideoWidth(null);
+        setVideoHeight(null);
+        setVideoDuration(null);
+        setVideoBitrate(null);
+        setVideoSize(null);
+        setVideoFps(null);
+        setVideoClipFrames(null);
     };
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
@@ -309,6 +666,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [previewHash, setPreviewHash] = useState<string | null>(null);
     const [brisqueValue, setBrisqueValue] = useState<number | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [analyzingMsg, setAnalyzingMsg] = useState<string>("Processing video…");
     const [zkProofData, setZkProofData] = useState<any | null>(null);
     const [zkProofStatus, setZkProofStatus] = useState<"idle" | "generating" | "done" | "failed">("idle");
     const [imageFilePath, setImageFilePath] = useState<string | null>(null);
@@ -339,6 +697,36 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [cropBoxY, setCropBoxY] = useState(0);
     const cropImgRef = useRef<HTMLImageElement>(null);
     const cropDragStart = useRef<{ mx: number; my: number; bx: number; by: number } | null>(null);
+    // Video fields
+    const [videoThumbDataUrl, setVideoThumbDataUrl] = useState<string | null>(null);
+    const [videoThumbHash, setVideoThumbHash] = useState<string | null>(null);
+    const [videoClipDataUrl, setVideoClipDataUrl] = useState<string | null>(null);
+    const [videoClipHash, setVideoClipHash] = useState<string | null>(null);
+    const [videoWidth, setVideoWidth] = useState<number | null>(null);
+    const [videoHeight, setVideoHeight] = useState<number | null>(null);
+    const [videoDuration, setVideoDuration] = useState<number | null>(null);
+    const [videoBitrate, setVideoBitrate] = useState<number | null>(null);
+    const [videoSize, setVideoSize] = useState<number | null>(null);  // canonical container size
+    const [videoFps, setVideoFps] = useState<number | null>(null);
+    const [videoClipFrames, setVideoClipFrames] = useState<number | null>(null);
+    const [videoSr, setVideoSr] = useState<number | null>(null);
+    const [videoNSamp, setVideoNSamp] = useState<number | null>(null);
+
+    // Blob URLs for video preview players (converted from data URLs for Chrome seekability)
+    const [videoThumbBlobSrc, setVideoThumbBlobSrc] = useState<string | null>(null);
+    const [videoClipBlobSrc, setVideoClipBlobSrc]   = useState<string | null>(null);
+    useEffect(() => {
+        if (!videoThumbDataUrl) { setVideoThumbBlobSrc(null); return; }
+        const url = dataUrlToObjectUrl(videoThumbDataUrl);
+        setVideoThumbBlobSrc(url);
+        return () => URL.revokeObjectURL(url);
+    }, [videoThumbDataUrl]);
+    useEffect(() => {
+        if (!videoClipDataUrl) { setVideoClipBlobSrc(null); return; }
+        const url = dataUrlToObjectUrl(videoClipDataUrl);
+        setVideoClipBlobSrc(url);
+        return () => URL.revokeObjectURL(url);
+    }, [videoClipDataUrl]);
 
     const imageInputRef = useRef<HTMLInputElement>(null);
     const ethChfRate = useEthChfRate();
@@ -362,32 +750,36 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setExtImgSize(null);
         if (algo === "default") return;
         const blob = await fetch(dataUrl).then((r) => r.blob());
-        const bitmap = await createImageBitmap(blob);
-        const { width, height } = bitmap;
+        // Build BMP from the data URL to get exact pixel data matching the circuit.
+        const bmpFile = new File([blob], "img.bmp", { type: blob.type });
+        const { bmpBytes, bmpWidth: width, bmpHeight: height } = await buildBmpBytesFromFile(bmpFile);
         if (algo === "extended_image") {
             const bmpRowSize = (width * 3 + 3) & ~3;
-            const containerSize = 64 + 196608 + (54 + bmpRowSize * height);
+            const bmpSize = 54 + bmpRowSize * height;
+            const containerSize = 64 + bmpSize;
             setExtImgWidth(width);
             setExtImgHeight(height);
             setExtImgSize(containerSize);
         }
-        const tCanvas = new OffscreenCanvas(256, 256);
-        const tCtx = tCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
-        tCtx.drawImage(bitmap, 0, 0, 256, 256);
-        bitmap.close();
-        const imgData = tCtx.getImageData(0, 0, 256, 256);
-        const rgbBytes = new Uint8Array(196608);
-        for (let i = 0; i < 65536; i++) {
-            rgbBytes[i * 3]     = imgData.data[i * 4];
-            rgbBytes[i * 3 + 1] = imgData.data[i * 4 + 1];
-            rgbBytes[i * 3 + 2] = imgData.data[i * 4 + 2];
-        }
-        const thumbHashBuf = await crypto.subtle.digest("SHA-256", rgbBytes);
+        // Compute d_thumb from BMP pixels (NN, BGR, bottom-to-top — same as circuit)
+        const thumbBytes = computeThumbBytesFromBmp(bmpBytes, width, height);
+        const thumbHashBuf = await crypto.subtle.digest("SHA-256", thumbBytes.buffer as ArrayBuffer);
         const thumbHash = Array.from(new Uint8Array(thumbHashBuf))
             .map((b) => b.toString(16).padStart(2, "0")).join("");
         setExtImgThumbHash(thumbHash);
         setPreviewHash(thumbHash);
-        const thumbBlob = await tCanvas.convertToBlob({ type: "image/png" });
+        // Generate preview image from BGR thumb bytes (convert BGR→RGBA for display)
+        const previewCanvas = new OffscreenCanvas(256, 256);
+        const previewCtx = previewCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+        const previewImgData = previewCtx.createImageData(256, 256);
+        for (let i = 0; i < 65536; i++) {
+            previewImgData.data[i * 4]     = thumbBytes[i * 3 + 2]; // R (from BGR)
+            previewImgData.data[i * 4 + 1] = thumbBytes[i * 3 + 1]; // G
+            previewImgData.data[i * 4 + 2] = thumbBytes[i * 3];     // B
+            previewImgData.data[i * 4 + 3] = 255;
+        }
+        previewCtx.putImageData(previewImgData, 0, 0);
+        const thumbBlob = await previewCanvas.convertToBlob({ type: "image/png" });
         const previewUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as string);
@@ -458,40 +850,38 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
 
         try {
             if (algo === "extended_image" || algo === "extended_image_crop" || algo === "extended_image_dual") {
-                const bitmap = await createImageBitmap(file);
-                const { width, height } = bitmap;
+                // Build canonical BMP to get exact pixel data matching the circuit.
+                const { bmpBytes, bmpWidth: width, bmpHeight: height } = await buildBmpBytesFromFile(file);
 
+                // Container = header(64B) + BMP (no pre-embedded thumb/crop sections)
                 const bmpRowSize = (width * 3 + 3) & ~3;
-                // extended_image: header + thumb + BMP
-                // extended_image_crop: header + crop + BMP
-                // extended_image_dual: header + thumb + crop + BMP
                 const bmpSize = 54 + bmpRowSize * height;
-                const thumbPart = (algo === "extended_image" || algo === "extended_image_dual") ? 196608 : 0;
-                const cropPart  = (algo === "extended_image_crop" || algo === "extended_image_dual") ? 196608 : 0;
-                const containerSize = 64 + thumbPart + cropPart + bmpSize;
+                const containerSize = 64 + bmpSize;
                 setExtImgWidth(width);
                 setExtImgHeight(height);
                 setExtImgSize(containerSize);
 
                 if (algo === "extended_image" || algo === "extended_image_dual") {
-                    // Build 256×256 scaled thumbnail
-                    const tCanvas = new OffscreenCanvas(256, 256);
-                    const tCtx = tCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
-                    tCtx.drawImage(bitmap, 0, 0, 256, 256);
-                    const imgData = tCtx.getImageData(0, 0, 256, 256);
-                    const rgbBytes = new Uint8Array(196608);
-                    for (let i = 0; i < 65536; i++) {
-                        rgbBytes[i * 3]     = imgData.data[i * 4];
-                        rgbBytes[i * 3 + 1] = imgData.data[i * 4 + 1];
-                        rgbBytes[i * 3 + 2] = imgData.data[i * 4 + 2];
-                    }
-                    const thumbHashBuf = await crypto.subtle.digest("SHA-256", rgbBytes);
+                    // Compute d_thumb from BMP pixels (NN, BGR, bottom-to-top — same as circuit)
+                    const thumbBytes = computeThumbBytesFromBmp(bmpBytes, width, height);
+                    const thumbHashBuf = await crypto.subtle.digest("SHA-256", thumbBytes.buffer as ArrayBuffer);
                     const thumbHash = Array.from(new Uint8Array(thumbHashBuf))
                         .map((b) => b.toString(16).padStart(2, "0")).join("");
                     setExtImgThumbHash(thumbHash);
                     setPreviewHash(thumbHash);
 
-                    const blob = await tCanvas.convertToBlob({ type: "image/png" });
+                    // Generate preview from BGR thumb bytes (convert BGR→RGBA for display)
+                    const previewCanvas = new OffscreenCanvas(256, 256);
+                    const previewCtx = previewCanvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+                    const previewImgData = previewCtx.createImageData(256, 256);
+                    for (let i = 0; i < 65536; i++) {
+                        previewImgData.data[i * 4]     = thumbBytes[i * 3 + 2]; // R (from BGR)
+                        previewImgData.data[i * 4 + 1] = thumbBytes[i * 3 + 1]; // G
+                        previewImgData.data[i * 4 + 2] = thumbBytes[i * 3];     // B
+                        previewImgData.data[i * 4 + 3] = 255;
+                    }
+                    previewCtx.putImageData(previewImgData, 0, 0);
+                    const blob = await previewCanvas.convertToBlob({ type: "image/png" });
                     const previewUrl = await new Promise<string>((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = () => resolve(reader.result as string);
@@ -501,7 +891,6 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     setPreviewDataUrl(previewUrl);
                 }
 
-                bitmap.close();
                 // For crop algorithms: crop selection is done interactively via the UI after file load.
             } else {
                 // ZK: generate thumbnail + BRISQUE score
@@ -543,38 +932,45 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             const needsPreview = algo === "extended_audio" || algo === "extended_audio_both";
             const needsLowres  = algo === "extended_audio_lowres" || algo === "extended_audio_both";
 
-            let durationSecs = 0, bitrateKbps = 0;
+            let durationSecs = 0, bitrateKbps = 0, originalSr = 44100;
 
             if (needsPreview) {
                 const result = await buildAudioPreview(file);
                 durationSecs = result.durationSecs;
                 bitrateKbps  = result.bitrateKbps;
+                originalSr   = result.sampleRate;
                 setAudioPreviewUrl(result.wavDataUrl);
                 setAudioPreviewHash(result.previewHash);
                 setAudioPreviewSr(result.sampleRate);
             }
             if (needsLowres) {
-                const result = await buildLowresAudio(file);
-                setAudioLowresUrl(result.wavDataUrl);
-                setAudioLowresHash(result.lowresHash);
-                setAudioLowresSr(result.effectiveSampleRate);
+                const lowresResult = await pcmDecimatedHash(file);
+                setAudioLowresHash(lowresResult.hash);
                 if (!needsPreview) {
-                    durationSecs = Math.round(result.durationSecs);
-                    bitrateKbps  = result.bitrateKbps;
+                    // for extended_audio_lowres, get duration/bitrate from the WAV builder
+                    const wavResult = await buildLowresAudio(file);
+                    setAudioLowresUrl(wavResult.wavDataUrl);
+                    setAudioLowresSr(wavResult.effectiveSampleRate);
+                    durationSecs = Math.round(wavResult.durationSecs);
+                    bitrateKbps  = wavResult.bitrateKbps;
+                    originalSr   = lowresResult.sampleRate;
+                } else {
+                    // for extended_audio_both, WAV was already built by buildAudioPreview path... no
+                    // we still need the lowres WAV for playback
+                    const wavResult = await buildLowresAudio(file);
+                    setAudioLowresUrl(wavResult.wavDataUrl);
+                    setAudioLowresSr(wavResult.effectiveSampleRate);
                 }
             }
 
             setAudioDuration(durationSecs || null);
             setAudioBitrate(bitrateKbps || null);
 
-            // Container sizes:
-            // extended_audio:        header(64) + preview(480000) + original
-            // extended_audio_lowres: header(64) + lowres(720000)  + original
-            // extended_audio_both:   header(64) + preview(480000) + lowres(720000) + original
-            const previewPart = needsPreview ? AUDIO_PREVIEW_BYTES : 0;
-            const lowresPart  = needsLowres  ? AUDIO_LOWRES_BYTES  : 0;
-            const containerSize = 64 + previewPart + lowresPart + file.size;
-            setAudioSize(containerSize);
+            // All variants: x = header(64B) || full mono Int16 PCM
+            // Container size = 64 + max(AUDIO_CROP_SAMPLES, actualSamples) × 2
+            // (at least AUDIO_CROP_SAMPLES so d_crop range is always defined)
+            const estimatedSamples = Math.max(AUDIO_CROP_SAMPLES, Math.round(durationSecs * originalSr));
+            setAudioSize(64 + estimatedSamples * 2);
         } catch (err: any) {
             showToast(`Audio processing error: ${err.message}`, "error");
         } finally {
@@ -593,6 +989,8 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setAlgorithms(algo);
         if (listingType === "audio" && selectedFile) {
             processAudioFile(selectedFile, algo);
+        } else if (listingType === "video" && selectedFile) {
+            processVideoFile(selectedFile, algo);
         } else if (selectedFile && algo !== "default") {
             processImageFile(selectedFile, algo);
         } else if (selectedImageDataUrl && algo !== "default") {
@@ -661,26 +1059,25 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
 
         const nativeX = Math.min(Math.round(cropBoxX * scaleX), Math.max(0, natW - 256));
         const nativeY = Math.min(Math.round(cropBoxY * scaleY), Math.max(0, natH - 256));
-        const cropW = Math.min(256, natW - nativeX);
-        const cropH = Math.min(256, natH - nativeY);
 
-        const bitmap = await createImageBitmap(selectedFile);
-        const canvas = new OffscreenCanvas(256, 256);
-        const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
-        ctx.drawImage(bitmap, nativeX, nativeY, cropW, cropH, 0, 0, cropW, cropH);
-        bitmap.close();
-
-        const imgData = ctx.getImageData(0, 0, 256, 256);
-        const rgbBytes = new Uint8Array(196608);
-        for (let i = 0; i < 65536; i++) {
-            rgbBytes[i * 3]     = imgData.data[i * 4];
-            rgbBytes[i * 3 + 1] = imgData.data[i * 4 + 1];
-            rgbBytes[i * 3 + 2] = imgData.data[i * 4 + 2];
-        }
-        const hashBuf = await crypto.subtle.digest("SHA-256", rgbBytes);
+        // Build BMP and extract crop bytes matching the circuit algorithm (BGR, bottom-to-top rows)
+        const { bmpBytes, bmpWidth, bmpHeight } = await buildBmpBytesFromFile(selectedFile);
+        const cropBytes = computeCropBytesFromBmp(bmpBytes, bmpWidth, bmpHeight, nativeX, nativeY);
+        const hashBuf = await crypto.subtle.digest("SHA-256", cropBytes.buffer as ArrayBuffer);
         const hash = Array.from(new Uint8Array(hashBuf))
             .map(b => b.toString(16).padStart(2, "0")).join("");
 
+        // Generate a visual crop preview (BGR→RGBA for display)
+        const canvas = new OffscreenCanvas(256, 256);
+        const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+        const cropImgData = ctx.createImageData(256, 256);
+        for (let i = 0; i < 65536; i++) {
+            cropImgData.data[i * 4]     = cropBytes[i * 3 + 2]; // R (from BGR)
+            cropImgData.data[i * 4 + 1] = cropBytes[i * 3 + 1]; // G
+            cropImgData.data[i * 4 + 2] = cropBytes[i * 3];     // B
+            cropImgData.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(cropImgData, 0, 0);
         const blob = await canvas.convertToBlob({ type: "image/png" });
         const url = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
@@ -694,6 +1091,141 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setCropX(nativeX);
         setCropY(nativeY);
     }, [selectedFile, cropBoxX, cropBoxY]);
+
+    const processVideoFile = useCallback(async (file: File, algo: string) => {
+        setIsAnalyzing(true);
+        setAnalyzingMsg("Analysing video…");
+        setVideoThumbDataUrl(null); setVideoThumbHash(null);
+        setVideoClipDataUrl(null); setVideoClipHash(null);
+        setVideoWidth(null); setVideoHeight(null);
+        setVideoDuration(null); setVideoBitrate(null);
+        setVideoSize(null); setVideoFps(null); setVideoClipFrames(null);
+        setVideoSr(null); setVideoNSamp(null);
+        try {
+            const objectUrl = URL.createObjectURL(file);
+            // HTMLCanvasElement required (not OffscreenCanvas) so video frames render correctly
+            const video = document.createElement("video");
+            video.src = objectUrl;
+            video.muted = true;
+            await new Promise<void>((resolve, reject) => {
+                video.onloadedmetadata = () => resolve();
+                video.onerror = reject as any;
+            });
+            const origW = video.videoWidth;
+            const origH = video.videoHeight;
+            const dur   = Math.round(video.duration);
+            // Canonical container dimensions: downscaled so the container fits in memory.
+            // W,H ≥ 256 is required by the d_thumb circuit; long edge capped at ~480px.
+            const { cW, cH } = canonicalVideoDims(origW, origH);
+            const fps = CANONICAL_FPS;
+            const needsThumb  = algo === "extended_video" || algo === "extended_video_both";
+            const needsClip   = algo === "extended_video_clip" || algo === "extended_video_both";
+            const clipSec     = Math.min(VIDEO_CLIP_SECONDS, dur);
+            const nClipFrames = Math.round(clipSec * fps);
+
+            // Canvas at canonical resolution — all hash computations use these dimensions.
+            const canvas = document.createElement("canvas");
+            canvas.width = cW; canvas.height = cH;
+            const ctx = canvas.getContext("2d")!;
+
+            // ── Hash: top-left 256×256 of frame 0 at canonical resolution (circuit d_thumb) ──
+            if (video.readyState >= 2) {
+                // already at t=0
+            } else {
+                await new Promise<void>(r => { video.onseeked = () => r(); video.currentTime = 0; });
+            }
+            ctx.drawImage(video, 0, 0, cW, cH);
+            const thumbImgData = ctx.getImageData(0, 0, VIDEO_THUMB_W, VIDEO_THUMB_H);
+            const thumbRgb = new Uint8Array(VIDEO_THUMB_W * VIDEO_THUMB_H * 3);
+            for (let i = 0; i < VIDEO_THUMB_W * VIDEO_THUMB_H; i++) {
+                thumbRgb[i * 3]     = thumbImgData.data[i * 4];
+                thumbRgb[i * 3 + 1] = thumbImgData.data[i * 4 + 1];
+                thumbRgb[i * 3 + 2] = thumbImgData.data[i * 4 + 2];
+            }
+            const thumbHashBuf = await crypto.subtle.digest("SHA-256", thumbRgb.buffer as ArrayBuffer);
+            const thumbHash = Array.from(new Uint8Array(thumbHashBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+            // ── Hash: first nClipFrames raw RGB24 frames at canonical resolution (circuit d_clip) ──
+            let clipHash: string | null = null;
+            if (needsClip && nClipFrames > 0) {
+                const frameBytes = cW * cH * 3;
+                const clipBuf = new Uint8Array(nClipFrames * frameBytes);
+                for (let f = 0; f < nClipFrames; f++) {
+                    await new Promise<void>(r => { video.onseeked = () => r(); video.currentTime = f / fps; });
+                    ctx.drawImage(video, 0, 0, cW, cH);
+                    const idata = ctx.getImageData(0, 0, cW, cH);
+                    const base = f * frameBytes;
+                    for (let p = 0; p < cW * cH; p++) {
+                        clipBuf[base + p * 3]     = idata.data[p * 4];
+                        clipBuf[base + p * 3 + 1] = idata.data[p * 4 + 1];
+                        clipBuf[base + p * 3 + 2] = idata.data[p * 4 + 2];
+                    }
+                }
+                const clipHashBuf = await crypto.subtle.digest("SHA-256", clipBuf.buffer as ArrayBuffer);
+                clipHash = Array.from(new Uint8Array(clipHashBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+            }
+
+            const bitrateKbps = Math.round((file.size * 8 / 1024) / dur);
+
+            // Decode audio once; share the resulting AudioBuffer with both encode functions.
+            // Skipped for files > 1 GB to avoid OOM (decodeAudioData detaches the ArrayBuffer).
+            const MAX_AUDIO_FILE_SIZE = 1_000_000_000;
+            let audioBuffer: AudioBuffer | null = null;
+            let sr = 44100;
+            let nSamp = Math.round(dur * sr); // estimate; refined below if decode succeeds
+            if (file.size <= MAX_AUDIO_FILE_SIZE) {
+                try {
+                    const ab = await file.arrayBuffer(); // detached by decodeAudioData
+                    const tempCtx = new AudioContext();
+                    audioBuffer = await tempCtx.decodeAudioData(ab);
+                    await tempCtx.close();
+                    sr = Math.min(audioBuffer.sampleRate, 96_000);
+                    nSamp = Math.round(audioBuffer.duration * sr);
+                } catch { /* silent video */ }
+            }
+
+            // Canonical container size: header(64) + F×cW×cH×3 + mono Int16 PCM
+            const totalFrames = Math.round(dur * fps);
+            const containerSize = 64 + totalFrames * cW * cH * 3 + nSamp * 2;
+
+            // Store original resolution for display; circuit uses canonical dims derived at contract time.
+            setVideoWidth(origW); setVideoHeight(origH); setVideoDuration(dur);
+            setVideoBitrate(bitrateKbps); setVideoSize(containerSize); setVideoFps(fps);
+            setVideoSr(sr); setVideoNSamp(nSamp);
+
+            // ── Preview videos via WebCodecs ──────────────────────────────────
+            // Thumbnail: whole film re-encoded at ~320px width, 200 kbps VP9
+            if (needsThumb) {
+                setVideoThumbHash(thumbHash);
+                const thumbVideoUrl = await encodeVideoLowRes(objectUrl, cW, cH, dur, audioBuffer,
+                    (done, total) => setAnalyzingMsg(`Encoding thumbnail… ${done}/${total} frames`));
+                setAnalyzingMsg("Processing video…");
+                setVideoThumbDataUrl(thumbVideoUrl);
+            }
+            // Clip: first clipSec seconds at full resolution, ~5 Mbps
+            if (needsClip && nClipFrames > 0 && clipHash) {
+                setVideoClipHash(clipHash);
+                setVideoClipFrames(nClipFrames);
+                setAnalyzingMsg(`Encoding first ${clipSec}s clip…`);
+                const clipVideoUrl = await encodeVideoClip(objectUrl, cW, cH, clipSec, audioBuffer);
+                setAnalyzingMsg("Processing video…");
+                setVideoClipDataUrl(clipVideoUrl);
+            }
+
+            URL.revokeObjectURL(objectUrl);
+        } catch (e: any) {
+            showToast(`Video processing error: ${e.message}`, "error");
+        } finally {
+            setIsAnalyzing(false);
+        }
+    }, [showToast]);
+
+    const handleVideoSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setSelectedFile(file);
+        await processVideoFile(file, algorithms);
+    }, [algorithms, processVideoFile]);
 
     const handleSubmit = async () => {
         if (!title.trim()) {
@@ -726,6 +1258,18 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         }
         if (listingType === "audio" && !audioSize) {
             showToast("Please select an audio file", "warning");
+            return;
+        }
+        if (listingType === "video" && !videoSize) {
+            showToast("Please select a video file", "warning");
+            return;
+        }
+        if (listingType === "video" && (algorithms === "extended_video" || algorithms === "extended_video_both") && !videoThumbHash) {
+            showToast("Please select a video file to generate thumbnail", "warning");
+            return;
+        }
+        if (listingType === "video" && (algorithms === "extended_video_clip" || algorithms === "extended_video_both") && !videoClipHash) {
+            showToast("Please select a video file to generate clip hash", "warning");
             return;
         }
         // Hash Commitment: no preview required at listing time — file provided at fulfillment
@@ -774,6 +1318,26 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     body.preview_audio_lowres  = audioLowresUrl;
                     body.ext_audio_lowres_hash = audioLowresHash;
                     body.ext_audio_lowres_sr   = audioLowresSr;
+                }
+            }
+
+            if (listingType === "video") {
+                body.ext_video_width    = videoWidth;
+                body.ext_video_height   = videoHeight;
+                body.ext_video_duration = videoDuration;
+                body.ext_video_bitrate  = videoBitrate;
+                body.ext_video_size     = videoSize;  // canonical container size
+                body.ext_video_fps      = videoFps;
+                body.ext_video_sr       = videoSr;
+                body.ext_video_n_samp   = videoNSamp;
+                if (algorithms === "extended_video" || algorithms === "extended_video_both") {
+                    body.preview_video_thumb  = videoThumbDataUrl;
+                    body.ext_video_thumb_hash = videoThumbHash;
+                }
+                if (algorithms === "extended_video_clip" || algorithms === "extended_video_both") {
+                    body.preview_video_clip    = videoClipDataUrl;
+                    body.ext_video_clip_hash   = videoClipHash;
+                    body.ext_video_clip_frames = videoClipFrames;
                 }
             }
 
@@ -851,6 +1415,17 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                         }`}
                     >
                         Audio
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleListingTypeChange("video")}
+                        className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
+                            listingType === "video"
+                                ? "bg-green-600 text-white border-green-600"
+                                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                        }`}
+                    >
+                        Video
                     </button>
                 </div>
 
@@ -1067,6 +1642,52 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     </div>
                 )}
 
+                {listingType === "video" && (
+                    <div className="col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Video file</label>
+                        <input
+                            type="file"
+                            accept="video/*"
+                            onChange={handleVideoSelect}
+                            disabled={isAnalyzing}
+                            className="block w-full text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded file:border file:border-gray-300 file:text-sm file:bg-white hover:file:bg-gray-50 disabled:opacity-50"
+                        />
+                        {!videoSize && !isAnalyzing && (
+                            <p className="mt-1 text-xs text-gray-500">
+                                Select MP4, WebM, MKV… Thumbnail and clip hash are computed locally — the original is never sent to the server.
+                            </p>
+                        )}
+                        {isAnalyzing && <p className="mt-2 text-xs text-green-600">{analyzingMsg}</p>}
+                        {videoSize != null && !isAnalyzing && (
+                            <div className="mt-3 space-y-2">
+                                {videoThumbBlobSrc && (
+                                    <div>
+                                        <p className="text-xs text-gray-500 mb-1">Thumbnail (whole film, low-res WebM):</p>
+                                        <video controls src={videoThumbBlobSrc} className="w-full max-h-52 rounded border border-gray-200 bg-black" preload="auto" />
+                                        {videoThumbHash && <p className="text-xs font-mono text-gray-400 break-all mt-1">Thumb hash: {videoThumbHash.slice(0, 16)}…</p>}
+                                    </div>
+                                )}
+                                {videoClipBlobSrc && (
+                                    <div>
+                                        <p className="text-xs text-gray-500 mb-1">
+                                            Clip preview — first {videoClipFrames} frames @ {videoFps} fps (full resolution):
+                                        </p>
+                                        <video controls src={videoClipBlobSrc} className="w-full max-h-52 rounded border border-gray-200 bg-black" preload="auto" />
+                                        {videoClipHash && <p className="text-xs font-mono text-gray-400 break-all mt-1">Clip hash: {videoClipHash.slice(0, 16)}…</p>}
+                                    </div>
+                                )}
+                                <div className="text-xs text-gray-500 space-y-0.5">
+                                    {videoWidth != null && videoHeight != null && <p>Resolution: {videoWidth}×{videoHeight}</p>}
+                                    {videoDuration != null && <p>Duration: {videoDuration} s</p>}
+                                    {videoBitrate  != null && <p>Bitrate: ~{videoBitrate} kbps</p>}
+                                    {videoFps      != null && <p>FPS: {videoFps}</p>}
+                                    {videoSize     != null && <p>Container size (raw): {videoSize.toLocaleString()} B</p>}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div className="col-span-2">
                     <FormTextField id="listing-title" type="text" value={title} onChange={setTitle}>
                         Product Title
@@ -1124,6 +1745,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     options={
                         listingType === "image" ? ["default", "extended_image", "extended_image_crop", "extended_image_dual", "zk"] :
                         listingType === "audio" ? ["extended_audio", "extended_audio_lowres", "extended_audio_both"] :
+                        listingType === "video" ? ["extended_video", "extended_video_clip", "extended_video_both"] :
                         ["default"]
                     }
                     optionLabels={{
@@ -1134,6 +1756,9 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                         extended_audio: "Preview (native rate, cropped)",
                         extended_audio_lowres: "Full Low-res (adaptive rate, full duration)",
                         extended_audio_both: "Preview + Low-res (both)",
+                        extended_video: "Thumbnail (256×256, frame 0)",
+                        extended_video_clip: "Clip (first 3s raw frames)",
+                        extended_video_both: "Thumbnail + Clip (both)",
                         zk: "ZK Proof (SP1, ~1h)",
                     }}
                     disabled={listingType === "general"}

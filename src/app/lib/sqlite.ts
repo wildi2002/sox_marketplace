@@ -458,5 +458,49 @@ for (const col of [
         }
     }
 }
+// Extended video fields for listings
+for (const col of [
+    "preview_video_thumb TEXT",
+    "ext_video_thumb_hash TEXT",
+    "ext_video_width INTEGER",
+    "ext_video_height INTEGER",
+    "ext_video_duration INTEGER",
+    "ext_video_bitrate INTEGER",
+    "ext_video_size INTEGER",
+    "ext_video_fps INTEGER",
+    "ext_video_clip_frames INTEGER",
+    "preview_video_clip TEXT",
+    "ext_video_clip_hash TEXT",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
+// Extended video fields for contracts
+for (const col of [
+    "preview_video_thumb TEXT",
+    "ext_video_thumb_hash TEXT",
+    "ext_video_width INTEGER",
+    "ext_video_height INTEGER",
+    "ext_video_duration INTEGER",
+    "ext_video_bitrate INTEGER",
+    "ext_video_size INTEGER",
+    "ext_video_fps INTEGER",
+    "ext_video_clip_frames INTEGER",
+    "preview_video_clip TEXT",
+    "ext_video_clip_hash TEXT",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
+    }
+}
 
 export default db;

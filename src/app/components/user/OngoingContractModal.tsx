@@ -42,6 +42,9 @@ import init, {
     check_received_ct_key_extended_audio_v2,
     check_received_ct_key_extended_audio_lowres_v2,
     check_received_ct_key_extended_audio_both_v2,
+    check_received_ct_key_extended_video_v2,
+    check_received_ct_key_extended_video_clip_v2,
+    check_received_ct_key_extended_video_both_v2,
     compile_circuit_v2_wasm,
     compile_circuit_extended_image_v2_wasm,
     compile_circuit_extended_image_crop_v2_wasm,
@@ -49,6 +52,9 @@ import init, {
     compile_circuit_extended_audio_v2_wasm,
     compile_circuit_extended_audio_lowres_v2_wasm,
     compile_circuit_extended_audio_both_v2_wasm,
+    compile_circuit_extended_video_v2_wasm,
+    compile_circuit_extended_video_clip_v2_wasm,
+    compile_circuit_extended_video_both_v2_wasm,
     compute_proof_right_v2,
     compute_proofs_v2,
     compute_proofs_left_v2,
@@ -618,37 +624,42 @@ export default function OngoingContractModal({
         let success: boolean;
         let downloadBytes: Uint8Array;
         let downloadName: string;
-        const isExtImg      = algorithm_suite === "extended_image";
-        const isExtImgCrop  = algorithm_suite === "extended_image_crop";
-        const isExtImgDual  = algorithm_suite === "extended_image_dual";
+        const isExtImg       = algorithm_suite === "extended_image";
+        const isExtImgCrop   = algorithm_suite === "extended_image_crop";
+        const isExtImgDual   = algorithm_suite === "extended_image_dual";
         const isExtAudio     = algorithm_suite === "extended_audio";
         const isExtAudioLow  = algorithm_suite === "extended_audio_lowres";
         const isExtAudioBoth = algorithm_suite === "extended_audio_both";
+        const isExtVideo     = algorithm_suite === "extended_video";
+        const isExtVideoClip = algorithm_suite === "extended_video_clip";
+        const isExtVideoBoth = algorithm_suite === "extended_video_both";
         const isAnyExtImg    = isExtImg || isExtImgCrop || isExtImgDual;
         const isAnyExtAudio  = isExtAudio || isExtAudioLow || isExtAudioBoth;
+        const isAnyExtVideo  = isExtVideo || isExtVideoClip || isExtVideoBoth;
 
-        const descBytesForCheck = (isAnyExtImg || isAnyExtAudio) ? hex_to_bytes(item_description) : null;
+        const descBytesForCheck = (isAnyExtImg || isAnyExtAudio || isAnyExtVideo) ? hex_to_bytes(item_description) : null;
         const descLen = descBytesForCheck?.length ?? 0;
         try {
             let result;
-            if      (isExtImg      && descLen === 76)  result = check_received_ct_key_extended_image_v2(ct, hex_to_bytes(key), descBytesForCheck!);
-            else if (isExtImgCrop  && descLen === 76)  result = check_received_ct_key_extended_image_crop_v2(ct, hex_to_bytes(key), descBytesForCheck!);
-            else if (isExtImgDual  && descLen === 108) result = check_received_ct_key_extended_image_dual_v2(ct, hex_to_bytes(key), descBytesForCheck!);
-            else if (isExtAudio    && descLen === 76)  result = check_received_ct_key_extended_audio_v2(ct, hex_to_bytes(key), descBytesForCheck!);
-            else if (isExtAudioLow && descLen === 76)  result = check_received_ct_key_extended_audio_lowres_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            if      (isExtImg       && descLen === 76)  result = check_received_ct_key_extended_image_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtImgCrop   && descLen === 84)  result = check_received_ct_key_extended_image_crop_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtImgDual   && descLen === 116) result = check_received_ct_key_extended_image_dual_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtAudio     && descLen === 76)  result = check_received_ct_key_extended_audio_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtAudioLow  && descLen === 76)  result = check_received_ct_key_extended_audio_lowres_v2(ct, hex_to_bytes(key), descBytesForCheck!);
             else if (isExtAudioBoth && descLen === 108) result = check_received_ct_key_extended_audio_both_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtVideo     && descLen === 88)  result = check_received_ct_key_extended_video_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtVideoClip && descLen === 92)  result = check_received_ct_key_extended_video_clip_v2(ct, hex_to_bytes(key), descBytesForCheck!);
+            else if (isExtVideoBoth && descLen === 124) result = check_received_ct_key_extended_video_both_v2(ct, hex_to_bytes(key), descBytesForCheck!);
             else                                        result = check_received_ct_key(ct, hex_to_bytes(key), item_description);
             success = result.success;
             const raw = result.decrypted_file;
 
             if (isAnyExtImg) {
                 // Strip SOX image header to get the BMP bytes.
-                // extended_image:      header(64B) + thumb(196608B) → BMP at 196672
-                // extended_image_crop: header(64B) + crop(196608B)  → BMP at 196672
-                // extended_image_dual: header(64B) + thumb + crop   → BMP at 393280
-                const bmpOffset = isExtImgDual ? 393280 : 196672;
+                // All image containers: header(64B) | BMP → BMP at offset 64
+                const bmpOffset = 64;
                 let bmpStart = -1;
-                for (const off of [bmpOffset, 0, 64]) {
+                for (const off of [bmpOffset, 0]) {
                     if (raw.length > off + 1 && raw[off] === 0x42 && raw[off + 1] === 0x4D) {
                         bmpStart = off; break;
                     }
@@ -666,6 +677,9 @@ export default function OngoingContractModal({
                 // extended_audio_both:  header(64B) + preview(480000B) + lowres(720000B) → audio at 1200064
                 const audioOffset = isExtAudio ? 480_064 : isExtAudioLow ? 720_064 : 1_200_064;
                 downloadBytes = raw.length > audioOffset ? raw.slice(audioOffset) : raw;
+            } else if (isAnyExtVideo) {
+                // Video: deliver the full SOX container (header + raw RGB24 frames).
+                downloadBytes = raw;
             } else {
                 downloadBytes = raw;
             }
@@ -691,6 +705,7 @@ export default function OngoingContractModal({
             const fallbackName =
                 isAnyExtImg   ? (detectedImgExt   ? `image.${detectedImgExt}`   : "image.png") :
                 isAnyExtAudio ? (detectedAudioExt ? `audio.${detectedAudioExt}` : "audio.bin") :
+                isAnyExtVideo ? "video_container.bin" :
                 "decrypted_file";
             downloadName = file_name || fallbackName;
         } catch {
@@ -706,8 +721,8 @@ export default function OngoingContractModal({
 
         // --- Download (async, separate from decryption error handling) ---
         try {
-            if (isAnyExtAudio) {
-                // Audio file: download directly in its native format
+            if (isAnyExtAudio || isAnyExtVideo) {
+                // Audio/video: download directly in their container format
                 downloadFile(downloadBytes, downloadName);
             } else if (isAnyExtImg && downloadBytes[0] === 0x42 && downloadBytes[1] === 0x4D) {
                 // Canonical 24-bit bottom-up BMP — decode manually (Safari has no BMP support)
@@ -1317,12 +1332,15 @@ export default function OngoingContractModal({
         // Toujours compiler le circuit depuis le ciphertext (pas de sélection de circuit)
         const _db1 = hex_to_bytes(item_description);
         const circuit = (() => {
-            if (algorithm_suite === "extended_image"       && _db1.length === 76)  return compile_circuit_extended_image_v2_wasm(ct!, _db1);
-            if (algorithm_suite === "extended_image_crop"  && _db1.length === 76)  return compile_circuit_extended_image_crop_v2_wasm(ct!, _db1);
-            if (algorithm_suite === "extended_image_dual"  && _db1.length === 108) return compile_circuit_extended_image_dual_v2_wasm(ct!, _db1);
-            if (algorithm_suite === "extended_audio"       && _db1.length === 76)  return compile_circuit_extended_audio_v2_wasm(ct!, _db1);
-            if (algorithm_suite === "extended_audio_lowres" && _db1.length === 76) return compile_circuit_extended_audio_lowres_v2_wasm(ct!, _db1);
-            if (algorithm_suite === "extended_audio_both"  && _db1.length === 108) return compile_circuit_extended_audio_both_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_image"        && _db1.length === 76)  return compile_circuit_extended_image_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_image_crop"   && _db1.length === 76)  return compile_circuit_extended_image_crop_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_image_dual"   && _db1.length === 108) return compile_circuit_extended_image_dual_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_audio"        && _db1.length === 76)  return compile_circuit_extended_audio_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_audio_lowres" && _db1.length === 76)  return compile_circuit_extended_audio_lowres_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_audio_both"   && _db1.length === 112) return compile_circuit_extended_audio_both_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_video"        && _db1.length === 88)  return compile_circuit_extended_video_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_video_clip"   && _db1.length === 92)  return compile_circuit_extended_video_clip_v2_wasm(ct!, _db1);
+            if (algorithm_suite === "extended_video_both"   && _db1.length === 124) return compile_circuit_extended_video_both_v2_wasm(ct!, _db1);
             return compile_circuit_v2_wasm(ct!, item_description);
         })();
 
@@ -1373,7 +1391,10 @@ export default function OngoingContractModal({
             if (algorithm_suite === "extended_image_dual"   && _db2.length === 108) return compile_circuit_extended_image_dual_v2_wasm(ct, _db2);
             if (algorithm_suite === "extended_audio"        && _db2.length === 76)  return compile_circuit_extended_audio_v2_wasm(ct, _db2);
             if (algorithm_suite === "extended_audio_lowres" && _db2.length === 76)  return compile_circuit_extended_audio_lowres_v2_wasm(ct, _db2);
-            if (algorithm_suite === "extended_audio_both"   && _db2.length === 108) return compile_circuit_extended_audio_both_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_audio_both"   && _db2.length === 112) return compile_circuit_extended_audio_both_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_video"        && _db2.length === 88)  return compile_circuit_extended_video_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_video_clip"   && _db2.length === 92)  return compile_circuit_extended_video_clip_v2_wasm(ct, _db2);
+            if (algorithm_suite === "extended_video_both"   && _db2.length === 124) return compile_circuit_extended_video_both_v2_wasm(ct, _db2);
             return compile_circuit_v2_wasm(ct, item_description);
         })();
 

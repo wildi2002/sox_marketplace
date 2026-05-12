@@ -1,12 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
-export function compile_circuit_extended_audio_lowres_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
-/**
- * Compiles an extended-audio V2 circuit from a 76-byte serialised description.
- */
-export function compile_circuit_extended_audio_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
-export function compile_circuit_extended_audio_both_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
-export function compile_circuit_extended_image_crop_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
+export function compile_circuit_extended_image_dual_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
 /**
  * Compiles an extended-image V2 circuit from a 76-byte serialised description:
  *   bytes  0-31: SHA256(x)          (d_sha)
@@ -16,30 +10,245 @@ export function compile_circuit_extended_image_crop_v2_wasm(ct: Uint8Array, desc
  *   bytes 72-75: size   (BE u32)    (d_size)
  */
 export function compile_circuit_extended_image_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
-export function check_received_ct_key_extended_image_dual_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+export function compile_circuit_extended_audio_lowres_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
+/**
+ * Compiles an extended-audio V2 circuit from a 76-byte serialised description.
+ */
+export function compile_circuit_extended_audio_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
+/**
+ * Verifies an extended-video-clip V2 precontract commitment.
+ * description must be 132 bytes:
+ *   d_sha(32) || d_clip(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE) || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE)
+ */
+export function check_precontract_extended_video_clip_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+/**
+ * Computes proofs for step 8b (V2) - corresponds to Step 8b in paper (Section F.2).
+ *
+ * # Arguments
+ * * `circuit_bytes` - Serialized V2 circuit bytes
+ * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
+ * * `ct` - Ciphertext bytes
+ * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
+ *
+ * # Returns
+ * A `FinalStepComponentsV2` containing:
+ * - Gate information (64-byte encoded gate)
+ * - Evaluated values at the challenge point
+ * - Current accumulator value
+ * - Multiple proofs (proof1, proof2, proof_ext)
+ * Note that the returning object will have a proof3 component which is an empty array.
+ *
+ * # Paper Correspondence
+ * This implements Step 8b from the paper: "Case i = 1 following Step 8"
+ * - challenge (code) = 1 corresponds to i = 1 in paper notation
+ * - This case occurs when V said "left" for all challenges (disagreed on every hpre)
+ * - There is no w_{i-1} defined in this case (hpre(0) = ∅ by convention in paper)
+ */
+export function compute_proofs_left_v2(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponentsV2;
+/**
+ * Computes the proof for step 8c.
+ *
+ * # Arguments
+ * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
+ * * `num_blocks` - Number of blocks for the ciphertext
+ * * `num_gates` - Total number of gates in the circuit
+ *
+ * # Returns
+ * A JavaScript `Array` containing the proof
+ */
+export function compute_proof_right(evaluated_circuit_bytes: Uint8Array, num_blocks: number, num_gates: number): Array<any>;
+export function check_received_ct_key_extended_image_crop_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+/**
+ * Computes precontract for a both-audio container (format 0x03).
+ * description = d_sha(32) || d_crop(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE) = 112 bytes.
+ */
+export function compute_precontract_extended_audio_both_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_crop: Uint8Array, d_lowres: Uint8Array, d_duration: number, d_bitrate: number, d_size: number, d_total_samples: number): Precontract;
 /**
  * Verifies an extended-audio-both V2 precontract commitment.
- * description must be 108 bytes: d_sha(32) || d_preview(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE).
+ * description must be 112 bytes: d_sha(32) || d_crop(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE).
  */
 export function check_precontract_extended_audio_both_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 /**
- * Evaluates a circuit with the given ciphertext, constants, and description.
+ * Verifies an extended-image-dual V2 precontract commitment.
+ * description must be 116 bytes: d_sha(32) || d_thumb(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE) || crop_x(4BE) || crop_y(4BE).
+ */
+export function check_precontract_extended_image_dual_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+/**
+ * Computes proofs for step 8a (V2) - corresponds to Step 8a in paper (Section F.2).
  *
  * # Arguments
- * * `circuit_bytes` - Serialized circuit bytes. If empty, a new basic circuit will be compiled
- * * `ct` - Ciphertext bytes to evaluate
- * * `constants` - Vector of hex-encoded constant values
- * * `description` - Description hash in hex format
+ * * `circuit_bytes` - Serialized V2 circuit bytes
+ * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
+ * * `ct` - Ciphertext bytes
+ * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
  *
  * # Returns
- * An `EvaluatedCircuit` containing the evaluation results and circuit constants
+ * A `FinalStepComponentsV2` containing:
+ * - Gate information (64-byte encoded gate)
+ * - Evaluated values at the challenge point
+ * - Current accumulator value
+ * - Multiple proofs (proof1, proof2, proof3, proof_ext)
  *
- * # Details
- * This function either uses an existing circuit (from circuit_bytes) or creates a new basic circuit
- * based on the ciphertext length and description. It then evaluates the circuit with the given
- * ciphertext and constants.
+ * # Paper Correspondence
+ * This implements Step 8a from the paper: "Case 1 < i ≤ n following Step 8"
+ * - challenge (code) = i (paper), where 1 < i ≤ n in paper notation
+ * - So challenge must satisfy: 1 < challenge ≤ numGates
+ * - The gate g_i in paper corresponds to circuit.gates[challenge - 1] in code (converting 1-indexed to 0-indexed)
  */
-export function evaluate_circuit(circuit_bytes: Uint8Array, ct: Uint8Array, constants: string[], description: string): EvaluatedCircuit;
+export function compute_proofs_v2(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponentsV2;
+/**
+ * Verifies a dispute argument.
+ *
+ * # Arguments
+ * * `argument_bin` - Serialized dispute argument bytes
+ * * `commitment` - Commitment in hex format
+ * * `description` - Description hash in hex format
+ * * `key` - Encryption key in hex format
+ *
+ * # Returns
+ * An `ArgumentCheckResult` containing the verification results
+ */
+export function check_argument(argument_bin: Uint8Array, commitment: string, description: string, key: string): ArgumentCheckResult;
+/**
+ * Verifies a V2 precontract by checking the commitment and description with respect to the
+ * received ciphertext, using the V2 circuit.
+ *
+ * # Arguments
+ * * `description` - Hex-encoded description hash
+ * * `commitment` - Hex-encoded commitment
+ * * `opening_value` - Hex-encoded opening value
+ * * `ct` - Ciphertext bytes
+ *
+ * # Returns
+ * A `CheckPrecontractResult` containing the verification status and hash values
+ */
+export function check_precontract_v2(description: string, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+/**
+ * Computes precontract for a video-clip container (format 0x02).
+ * description = d_sha(32) || d_clip(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *              || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE) = 132 bytes.
+ */
+export function compute_precontract_extended_video_clip_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_clip: Uint8Array, d_crop: Uint8Array, d_size: number, d_duration: number, d_bitrate: number, d_width: number, d_height: number, d_fps: number, d_sr: number, d_n_samp: number, d_clip_frames: number): Precontract;
+export function check_received_ct_key_extended_image_dual_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+export function check_received_ct_key_extended_video_both_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+/**
+ * Computes precontract for a crop-preview image container (format 0x02).
+ * description = d_sha(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE)
+ *             || crop_x(4BE) || crop_y(4BE) = 84 bytes.
+ */
+export function compute_precontract_extended_image_crop_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_crop: Uint8Array, d_width: number, d_height: number, d_size: number, crop_x: number, crop_y: number): Precontract;
+/**
+ * Computes the proof for step 8c (V2) - corresponds to Step 8c in paper (Section F.2).
+ *
+ * # Arguments
+ * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
+ * * `num_blocks` - Number of blocks for the ciphertext
+ * * `num_gates` - Total number of gates in the circuit (n in paper notation)
+ *
+ * # Returns
+ * A JavaScript `Array` containing the proof
+ *
+ * # Paper Correspondence
+ * This implements Step 8c from the paper: "Case i = n + 1 following Step 8"
+ * - challenge (code) = numGates corresponds to i = n + 1 in paper notation
+ * - This case occurs when V said "right" for all challenges (agreed on every hpre)
+ * - The proof verifies that val(n) is correct (the final gate output)
+ */
+export function compute_proof_right_v2(evaluated_circuit_bytes: Uint8Array, num_blocks: number, num_gates: number): Array<any>;
+/**
+ * Verifies an extended-video V2 precontract commitment.
+ * description must be 128 bytes:
+ *   d_sha(32) || d_thumb(32) || d_lowres(32) || size(4BE) || duration(4BE) || bitrate(4BE) || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE)
+ */
+export function check_precontract_extended_video_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+export function compile_circuit_extended_image_crop_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
+export function check_received_ct_key_extended_audio_lowres_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+/**
+ * Creates a dispute argument from the given components.
+ *
+ * # Arguments
+ * * `ct` - Ciphertext bytes
+ * * `description` - Description hash in hex format
+ * * `opening_value` - Opening value in hex format
+ *
+ * # Returns
+ * Serialized dispute argument bytes
+ */
+export function make_argument(ct: Uint8Array, description: string, opening_value: string): Uint8Array;
+/**
+ * Computes precontract for a video-both container (format 0x03).
+ * description = d_sha(32) || d_thumb(32) || d_clip(32) || d_lowres(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *              || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE) = 196 bytes.
+ */
+export function compute_precontract_extended_video_both_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_clip: Uint8Array, d_lowres: Uint8Array, d_crop: Uint8Array, d_size: number, d_duration: number, d_bitrate: number, d_width: number, d_height: number, d_fps: number, d_sr: number, d_n_samp: number, d_clip_frames: number): Precontract;
+/**
+ * Decrypts a ciphertext and verifies all extended-image description components.
+ * Computes the NN thumbnail from the BMP pixel data (same algorithm as the circuit)
+ * and verifies SHA256(computed_thumb) = d_thumb.
+ */
+export function check_received_ct_key_extended_image_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+/**
+ * Computes proofs for step 8b.
+ *
+ * # Arguments
+ * * `circuit_bytes` - Serialized circuit bytes
+ * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
+ * * `ct` - Ciphertext bytes
+ * * `challenge` - Challenge point in the circuit
+ *
+ * # Returns
+ * A `FinalStepComponents` containing:
+ * - Gate information for the challenge point
+ * - Evaluated values at the challenge point
+ * - Current accumulator value
+ * - Multiple proofs (proof1, proof2, proof_ext)
+ * Note that the returning object will have a proof3 component which is an empty array.
+ */
+export function compute_proofs_left(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponents;
+/**
+ * Computes precontract for a dual-preview image container (format 0x03).
+ * description = d_sha(32) || d_thumb(32) || d_crop(32) || imgW(4BE) || imgH(4BE)
+ *             || size(4BE) || crop_x(4BE) || crop_y(4BE) = 116 bytes.
+ */
+export function compute_precontract_extended_image_dual_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_crop: Uint8Array, d_width: number, d_height: number, d_size: number, crop_x: number, crop_y: number): Precontract;
+/**
+ * Computes precontract values for V2 circuit. This includes encryption, V2 circuit compilation,
+ * and commitment generation.
+ *
+ * # Arguments
+ * * `file` - The file data to be encrypted
+ * * `key` - The encryption key
+ *
+ * # Returns
+ * A `Precontract` containing all necessary components for the optimistic phase of the protocol
+ */
+export function compute_precontract_values_v2(file: Uint8Array, key: Uint8Array): Precontract;
+export function compile_circuit_extended_video_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
+/**
+ * Verifies an extended-image V2 precontract commitment.
+ * description (hex) must encode 76 bytes: d_sha(32) || d_thumb(32) || w(4BE) || h(4BE) || size(4BE).
+ */
+export function check_precontract_extended_image_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+export function compile_circuit_extended_audio_both_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
+/**
+ * Verifies an extended-image-crop V2 precontract commitment.
+ * description must be 84 bytes: d_sha(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE) || crop_x(4BE) || crop_y(4BE).
+ */
+export function check_precontract_extended_image_crop_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+export function check_received_ct_key_extended_video_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+/**
+ * Computes precontract values for a file. This includes encryption, circuit compilation,
+ * and commitment generation.
+ *
+ * # Arguments
+ * * `file` - The file data to be encrypted
+ * * `key` - The encryption key
+ *
+ * # Returns
+ * A `Precontract` containing all necessary components for the optimistic phase of the protocol
+ */
+export function compute_precontract_values(file: Uint8Array, key: Uint8Array): Precontract;
+export function compile_circuit_extended_video_both_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
 /**
  * Computes the answer to send to a smart contract based on the issued challenge (V2).
  *
@@ -69,6 +278,51 @@ export function evaluate_circuit(circuit_bytes: Uint8Array, ct: Uint8Array, cons
  */
 export function hpre_v2(evaluated_circuit_bytes: Uint8Array, num_blocks: number, challenge: number): Uint8Array;
 /**
+ * Verifies a precontract by checking the commitment and description with respect to the received
+ * ciphertext.
+ *
+ * # Arguments
+ * * `description` - Hex-encoded description hash
+ * * `commitment` - Hex-encoded commitment
+ * * `opening_value` - Hex-encoded opening value
+ * * `ct` - Ciphertext bytes
+ *
+ * # Returns
+ * A `CheckPrecontractResult` containing the verification status and hash values
+ */
+export function check_precontract(description: string, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+/**
+ * Compiles a V2 circuit from ciphertext and description.
+ *
+ * # Arguments
+ * * `ct` - Ciphertext bytes (must include 16-byte IV)
+ * * `description` - Description hash as hex string
+ *
+ * # Returns
+ * Serialized CompiledCircuitV2 bytes
+ */
+export function compile_circuit_v2_wasm(ct: Uint8Array, description: string): Uint8Array;
+/**
+ * Verifies an extended-video-both V2 precontract commitment.
+ * description must be 196 bytes:
+ *   d_sha(32) || d_thumb(32) || d_clip(32) || d_lowres(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *   || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE)
+ */
+export function check_precontract_extended_video_both_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+/**
+ * Computes precontract values for an image using the extended description circuit.
+ *
+ * Container layout (file = x = what the vendor encrypts and sells):
+ *   bytes   0– 63: header (format 1B | size 4B | width 4B | height 4B | reserved 51B)
+ *   bytes  64+   : standard BMP file (no thumbnail segment embedded)
+ *
+ * The circuit computes the 256×256 NN thumbnail directly from the BMP pixel data.
+ * d_thumb must be SHA256(NN thumbnail computed the same way as the circuit — nearest-neighbour
+ * with source pixel (ox*W/256, oy*H/256) and BGR byte order matching BMP storage).
+ */
+export function compute_precontract_extended_image_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_width: number, d_height: number, d_format: number, d_size: number): Precontract;
+export function check_received_ct_key_extended_audio_both_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+/**
  * Computes proofs for step 8a.
  *
  * # Arguments
@@ -86,54 +340,21 @@ export function hpre_v2(evaluated_circuit_bytes: Uint8Array, num_blocks: number,
  */
 export function compute_proofs(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponents;
 /**
- * Verifies an extended-image-dual V2 precontract commitment.
- * description must be 108 bytes: d_sha(32) || d_thumb(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE).
+ * Decrypts a ciphertext and verifies all extended-audio description components.
  */
-export function check_precontract_extended_image_dual_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+export function check_received_ct_key_extended_audio_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
 /**
- * Creates a dispute argument from the given components.
- *
- * # Arguments
- * * `ct` - Ciphertext bytes
- * * `description` - Description hash in hex format
- * * `opening_value` - Opening value in hex format
- *
- * # Returns
- * Serialized dispute argument bytes
+ * Verifies an extended-audio-lowres V2 precontract commitment.
+ * description must be 80 bytes: d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE).
  */
-export function make_argument(ct: Uint8Array, description: string, opening_value: string): Uint8Array;
+export function check_precontract_extended_audio_lowres_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 /**
- * Computes proofs for step 8b.
- *
- * # Arguments
- * * `circuit_bytes` - Serialized circuit bytes
- * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
- * * `ct` - Ciphertext bytes
- * * `challenge` - Challenge point in the circuit
- *
- * # Returns
- * A `FinalStepComponents` containing:
- * - Gate information for the challenge point
- * - Evaluated values at the challenge point
- * - Current accumulator value
- * - Multiple proofs (proof1, proof2, proof_ext)
- * Note that the returning object will have a proof3 component which is an empty array.
+ * Computes precontract for a video-thumb container (format 0x01).
+ * description = d_sha(32) || d_thumb(32) || d_audio(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *              || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) = 128 bytes.
  */
-export function compute_proofs_left(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponents;
-/**
- * Verifies a V2 precontract by checking the commitment and description with respect to the
- * received ciphertext, using the V2 circuit.
- *
- * # Arguments
- * * `description` - Hex-encoded description hash
- * * `commitment` - Hex-encoded commitment
- * * `opening_value` - Hex-encoded opening value
- * * `ct` - Ciphertext bytes
- *
- * # Returns
- * A `CheckPrecontractResult` containing the verification status and hash values
- */
-export function check_precontract_v2(description: string, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+export function compute_precontract_extended_video_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_lowres: Uint8Array, d_size: number, d_duration: number, d_bitrate: number, d_width: number, d_height: number, d_fps: number, d_sr: number, d_n_samp: number): Precontract;
+export function check_received_ct_key_extended_video_clip_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
 /**
  * Computes the answer to send to a smart contract based on the issued challenge.
  *
@@ -146,82 +367,11 @@ export function check_precontract_v2(description: string, commitment: string, op
  * The response to the challenge
  */
 export function hpre(evaluated_circuit_bytes: Uint8Array, num_blocks: number, challenge: number): Uint8Array;
-export function check_received_ct_key_extended_audio_lowres_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
-/**
- * Verifies ciphertext decryption by checking against the description.
- *
- * # Arguments
- * * `ct` - Ciphertext bytes to decrypt
- * * `key` - Decryption key
- * * `description` - Expected description hash in hex
- *
- * # Returns
- * A `CheckCtResult` containing the verification status and decrypted data
- */
-export function check_received_ct_key(ct: Uint8Array, key: Uint8Array, description: string): CheckCtResult;
-/**
- * Computes precontract for a dual-preview image container (format 0x03).
- * description = d_sha(32) || d_thumb(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE) = 108 bytes.
- */
-export function compute_precontract_extended_image_dual_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_crop: Uint8Array, d_width: number, d_height: number, d_size: number): Precontract;
-export function compile_circuit_extended_image_dual_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
-export function check_received_ct_key_extended_audio_both_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
-/**
- * Verifies a dispute argument.
- *
- * # Arguments
- * * `argument_bin` - Serialized dispute argument bytes
- * * `commitment` - Commitment in hex format
- * * `description` - Description hash in hex format
- * * `key` - Encryption key in hex format
- *
- * # Returns
- * An `ArgumentCheckResult` containing the verification results
- */
-export function check_argument(argument_bin: Uint8Array, commitment: string, description: string, key: string): ArgumentCheckResult;
-/**
- * Decrypts a ciphertext and verifies all extended-audio description components.
- */
-export function check_received_ct_key_extended_audio_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
-/**
- * Computes precontract values for an image using the extended description circuit.
- *
- * The ciphertext must wrap a BMP container:
- *   bytes   0– 63: header (format 1B | size 4B | width 4B | height 4B | reserved 51B)
- *   bytes  64–196671: 256×256 raw-RGB thumbnail
- *   bytes 196672+  : BMP pixel data
- *
- * # Arguments
- * * `file`       - Plaintext file bytes (in BMP container format)
- * * `key`        - AES-128 encryption key (16 bytes)
- * * `d_sha`      - SHA256(file) — 32 bytes
- * * `d_thumb`    - SHA256(thumbnail bytes 64..196672) — 32 bytes
- * * `d_width`    - Image width in pixels
- * * `d_height`   - Image height in pixels
- * * `d_format`   - Format tag (0 = BMP)
- * * `d_size`     - File size in bytes
- *
- * # Returns
- * A `Precontract` with the extended-image circuit committed.
- */
-export function compute_precontract_extended_image_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_width: number, d_height: number, d_format: number, d_size: number): Precontract;
-/**
- * Computes the proof for step 8c.
- *
- * # Arguments
- * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
- * * `num_blocks` - Number of blocks for the ciphertext
- * * `num_gates` - Total number of gates in the circuit
- *
- * # Returns
- * A JavaScript `Array` containing the proof
- */
-export function compute_proof_right(evaluated_circuit_bytes: Uint8Array, num_blocks: number, num_gates: number): Array<any>;
 /**
  * Computes precontract for a low-res-full audio container (format 0x02).
- * description = d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) = 76 bytes.
+ * description = d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE) = 80 bytes.
  */
-export function compute_precontract_extended_audio_lowres_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_lowres: Uint8Array, d_duration: number, d_bitrate: number, d_size: number): Precontract;
+export function compute_precontract_extended_audio_lowres_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_lowres: Uint8Array, d_duration: number, d_bitrate: number, d_size: number, d_total_samples: number): Precontract;
 /**
  * Evaluates a V2 circuit with the given ciphertext and key.
  *
@@ -236,64 +386,10 @@ export function compute_precontract_extended_audio_lowres_v2(file: Uint8Array, k
  */
 export function evaluate_circuit_v2_wasm(circuit_bytes: Uint8Array, ct: Uint8Array, key: string): EvaluatedCircuitV2;
 /**
- * Decrypts a ciphertext and verifies all extended-image description components:
- *   SHA256(x), SHA256(thumb), width, height, size — against the 76-byte description tuple.
+ * Verifies an extended-audio V2 precontract commitment.
+ * description must be 76 bytes: d_sha(32) || d_crop(32) || duration(4BE) || bitrate(4BE) || size(4BE).
  */
-export function check_received_ct_key_extended_image_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
-/**
- * Computes the proof for step 8c (V2) - corresponds to Step 8c in paper (Section F.2).
- *
- * # Arguments
- * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
- * * `num_blocks` - Number of blocks for the ciphertext
- * * `num_gates` - Total number of gates in the circuit (n in paper notation)
- *
- * # Returns
- * A JavaScript `Array` containing the proof
- *
- * # Paper Correspondence
- * This implements Step 8c from the paper: "Case i = n + 1 following Step 8"
- * - challenge (code) = numGates corresponds to i = n + 1 in paper notation
- * - This case occurs when V said "right" for all challenges (agreed on every hpre)
- * - The proof verifies that val(n) is correct (the final gate output)
- */
-export function compute_proof_right_v2(evaluated_circuit_bytes: Uint8Array, num_blocks: number, num_gates: number): Array<any>;
-/**
- * Verifies an extended-image V2 precontract commitment.
- * description (hex) must encode 76 bytes: d_sha(32) || d_thumb(32) || w(4BE) || h(4BE) || size(4BE).
- */
-export function check_precontract_extended_image_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
-/**
- * Verifies an extended-image-crop V2 precontract commitment.
- * description must be 76 bytes: d_sha(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE).
- */
-export function check_precontract_extended_image_crop_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
-/**
- * Computes precontract values for a file. This includes encryption, circuit compilation,
- * and commitment generation.
- *
- * # Arguments
- * * `file` - The file data to be encrypted
- * * `key` - The encryption key
- *
- * # Returns
- * A `Precontract` containing all necessary components for the optimistic phase of the protocol
- */
-export function compute_precontract_values(file: Uint8Array, key: Uint8Array): Precontract;
-/**
- * Verifies a precontract by checking the commitment and description with respect to the received
- * ciphertext.
- *
- * # Arguments
- * * `description` - Hex-encoded description hash
- * * `commitment` - Hex-encoded commitment
- * * `opening_value` - Hex-encoded opening value
- * * `ct` - Ciphertext bytes
- *
- * # Returns
- * A `CheckPrecontractResult` containing the verification status and hash values
- */
-export function check_precontract(description: string, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+export function check_precontract_extended_audio_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 /**
  * Computes precontract values for an audio file using the extended audio description circuit.
  *
@@ -306,103 +402,43 @@ export function check_precontract(description: string, commitment: string, openi
  * * `file`       - Plaintext container bytes
  * * `key`        - AES-128 key (16 bytes)
  * * `d_sha`      - SHA256(file) — 32 bytes
- * * `d_preview`  - SHA256(preview PCM bytes 64..480064) — 32 bytes
+ * * `d_crop`     - SHA256(x[64..480064]) — first 240 000 Int16 samples — 32 bytes
  * * `d_duration` - Total duration in seconds
  * * `d_bitrate`  - Encoding bitrate in kbps
  * * `d_size`     - Container size in bytes
  */
-export function compute_precontract_extended_audio_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_preview: Uint8Array, d_duration: number, d_bitrate: number, d_size: number): Precontract;
+export function compute_precontract_extended_audio_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_crop: Uint8Array, d_duration: number, d_bitrate: number, d_size: number): Precontract;
 /**
- * Computes precontract values for V2 circuit. This includes encryption, V2 circuit compilation,
- * and commitment generation.
+ * Evaluates a circuit with the given ciphertext, constants, and description.
  *
  * # Arguments
- * * `file` - The file data to be encrypted
- * * `key` - The encryption key
+ * * `circuit_bytes` - Serialized circuit bytes. If empty, a new basic circuit will be compiled
+ * * `ct` - Ciphertext bytes to evaluate
+ * * `constants` - Vector of hex-encoded constant values
+ * * `description` - Description hash in hex format
  *
  * # Returns
- * A `Precontract` containing all necessary components for the optimistic phase of the protocol
+ * An `EvaluatedCircuit` containing the evaluation results and circuit constants
+ *
+ * # Details
+ * This function either uses an existing circuit (from circuit_bytes) or creates a new basic circuit
+ * based on the ciphertext length and description. It then evaluates the circuit with the given
+ * ciphertext and constants.
  */
-export function compute_precontract_values_v2(file: Uint8Array, key: Uint8Array): Precontract;
-export function check_received_ct_key_extended_image_crop_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
+export function evaluate_circuit(circuit_bytes: Uint8Array, ct: Uint8Array, constants: string[], description: string): EvaluatedCircuit;
+export function compile_circuit_extended_video_clip_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
 /**
- * Verifies an extended-audio-lowres V2 precontract commitment.
- * description must be 76 bytes: d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE).
- */
-export function check_precontract_extended_audio_lowres_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
-/**
- * Compiles a V2 circuit from ciphertext and description.
+ * Verifies ciphertext decryption by checking against the description.
  *
  * # Arguments
- * * `ct` - Ciphertext bytes (must include 16-byte IV)
- * * `description` - Description hash as hex string
+ * * `ct` - Ciphertext bytes to decrypt
+ * * `key` - Decryption key
+ * * `description` - Expected description hash in hex
  *
  * # Returns
- * Serialized CompiledCircuitV2 bytes
+ * A `CheckCtResult` containing the verification status and decrypted data
  */
-export function compile_circuit_v2_wasm(ct: Uint8Array, description: string): Uint8Array;
-/**
- * Computes precontract for a both-audio container (format 0x03).
- * description = d_sha(32) || d_preview(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) = 108 bytes.
- */
-export function compute_precontract_extended_audio_both_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_preview: Uint8Array, d_lowres: Uint8Array, d_duration: number, d_bitrate: number, d_size: number): Precontract;
-/**
- * Verifies an extended-audio V2 precontract commitment.
- * description must be 76 bytes: d_sha(32) || d_preview(32) || duration(4BE) || bitrate(4BE) || size(4BE).
- */
-export function check_precontract_extended_audio_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
-/**
- * Computes precontract for a crop-preview image container (format 0x02).
- * description = d_sha(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE) = 76 bytes.
- */
-export function compute_precontract_extended_image_crop_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_crop: Uint8Array, d_width: number, d_height: number, d_size: number): Precontract;
-/**
- * Computes proofs for step 8b (V2) - corresponds to Step 8b in paper (Section F.2).
- *
- * # Arguments
- * * `circuit_bytes` - Serialized V2 circuit bytes
- * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
- * * `ct` - Ciphertext bytes
- * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
- *
- * # Returns
- * A `FinalStepComponentsV2` containing:
- * - Gate information (64-byte encoded gate)
- * - Evaluated values at the challenge point
- * - Current accumulator value
- * - Multiple proofs (proof1, proof2, proof_ext)
- * Note that the returning object will have a proof3 component which is an empty array.
- *
- * # Paper Correspondence
- * This implements Step 8b from the paper: "Case i = 1 following Step 8"
- * - challenge (code) = 1 corresponds to i = 1 in paper notation
- * - This case occurs when V said "left" for all challenges (disagreed on every hpre)
- * - There is no w_{i-1} defined in this case (hpre(0) = ∅ by convention in paper)
- */
-export function compute_proofs_left_v2(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponentsV2;
-/**
- * Computes proofs for step 8a (V2) - corresponds to Step 8a in paper (Section F.2).
- *
- * # Arguments
- * * `circuit_bytes` - Serialized V2 circuit bytes
- * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
- * * `ct` - Ciphertext bytes
- * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
- *
- * # Returns
- * A `FinalStepComponentsV2` containing:
- * - Gate information (64-byte encoded gate)
- * - Evaluated values at the challenge point
- * - Current accumulator value
- * - Multiple proofs (proof1, proof2, proof3, proof_ext)
- *
- * # Paper Correspondence
- * This implements Step 8a from the paper: "Case 1 < i ≤ n following Step 8"
- * - challenge (code) = i (paper), where 1 < i ≤ n in paper notation
- * - So challenge must satisfy: 1 < challenge ≤ numGates
- * - The gate g_i in paper corresponds to circuit.gates[challenge - 1] in code (converting 1-indexed to 0-indexed)
- */
-export function compute_proofs_v2(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponentsV2;
+export function check_received_ct_key(ct: Uint8Array, key: Uint8Array, description: string): CheckCtResult;
 /**
  * JavaScript-compatible wrapper for sha256_compress
  *
@@ -919,6 +955,9 @@ export interface InitOutput {
   readonly check_precontract_extended_image_crop_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
   readonly check_precontract_extended_image_dual_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
   readonly check_precontract_extended_image_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+  readonly check_precontract_extended_video_both_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+  readonly check_precontract_extended_video_clip_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+  readonly check_precontract_extended_video_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
   readonly check_precontract_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
   readonly check_received_ct_key: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
   readonly check_received_ct_key_extended_audio_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
@@ -927,19 +966,28 @@ export interface InitOutput {
   readonly check_received_ct_key_extended_image_crop_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
   readonly check_received_ct_key_extended_image_dual_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
   readonly check_received_ct_key_extended_image_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
+  readonly check_received_ct_key_extended_video_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
+  readonly check_received_ct_key_extended_video_clip_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
+  readonly check_received_ct_key_extended_video_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
   readonly compile_circuit_extended_audio_both_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly compile_circuit_extended_audio_lowres_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly compile_circuit_extended_audio_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly compile_circuit_extended_image_crop_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly compile_circuit_extended_image_dual_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly compile_circuit_extended_image_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly compile_circuit_extended_video_both_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly compile_circuit_extended_video_clip_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly compile_circuit_extended_video_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly compile_circuit_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compute_precontract_extended_audio_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
-  readonly compute_precontract_extended_audio_lowres_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
+  readonly compute_precontract_extended_audio_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => number;
+  readonly compute_precontract_extended_audio_lowres_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => number;
   readonly compute_precontract_extended_audio_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
-  readonly compute_precontract_extended_image_crop_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
-  readonly compute_precontract_extended_image_dual_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
+  readonly compute_precontract_extended_image_crop_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
+  readonly compute_precontract_extended_image_dual_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => number;
   readonly compute_precontract_extended_image_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => number;
+  readonly compute_precontract_extended_video_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => number;
+  readonly compute_precontract_extended_video_clip_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number) => number;
+  readonly compute_precontract_extended_video_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => number;
   readonly compute_precontract_values: (a: number, b: number, c: any, d: number, e: number) => number;
   readonly compute_precontract_values_v2: (a: number, b: number, c: any, d: number, e: number) => number;
   readonly compute_proof_right: (a: number, b: number, c: number, d: number) => any;

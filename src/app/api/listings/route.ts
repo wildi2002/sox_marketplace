@@ -35,6 +35,9 @@ export async function POST(req: NextRequest) {
             preview_crop_image, ext_img_crop_hash, ext_img_crop_x, ext_img_crop_y,
             preview_audio_lowres, ext_audio_lowres_hash,
             ext_audio_preview_sr, ext_audio_lowres_sr,
+            preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
+            ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
+            ext_video_clip_frames, preview_video_clip, ext_video_clip_hash,
         } = body;
 
         if (!title || !price || !pk_vendor) {
@@ -49,8 +52,11 @@ export async function POST(req: NextRequest) {
                 preview_audio, ext_audio_preview_hash, ext_audio_duration, ext_audio_bitrate, ext_audio_size,
                 preview_crop_image, ext_img_crop_hash, ext_img_crop_x, ext_img_crop_y,
                 preview_audio_lowres, ext_audio_lowres_hash,
-                ext_audio_preview_sr, ext_audio_lowres_sr)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ext_audio_preview_sr, ext_audio_lowres_sr,
+                preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
+                ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
+                ext_video_clip_frames, preview_video_clip, ext_video_clip_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             title,
             description || "",
@@ -87,6 +93,17 @@ export async function POST(req: NextRequest) {
             ext_audio_lowres_hash ?? null,
             ext_audio_preview_sr ?? null,
             ext_audio_lowres_sr ?? null,
+            preview_video_thumb ?? null,
+            ext_video_thumb_hash ?? null,
+            ext_video_width ?? null,
+            ext_video_height ?? null,
+            ext_video_duration ?? null,
+            ext_video_bitrate ?? null,
+            ext_video_size ?? null,
+            ext_video_fps ?? null,
+            ext_video_clip_frames ?? null,
+            preview_video_clip ?? null,
+            ext_video_clip_hash ?? null,
         );
 
         return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 });

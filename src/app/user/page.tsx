@@ -3,14 +3,14 @@
 import Button from "../components/common/Button";
 import { useRouter } from "next/navigation";
 import OngoingContractsListView from "../components/user/OngoingContractsListView";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import NewContractModal from "../components/user/NewContractModal";
 import UnsponsoredContractsListView from "../components/user/UnsponsoredContractsListView";
 import NonAcceptedPrecontractsListView from "../components/user/NonAcceptedPrecontractsListView";
 import MyRequestsView from "../components/user/MyRequestsView";
 import { useUser } from "../lib/UserContext";
 
-export default function UserDashboard() {
+function UserDashboardContent() {
     const router = useRouter();
     const { user } = useUser();
 
@@ -63,5 +63,13 @@ export default function UserDashboard() {
                 />
             )}
         </main>
+    );
+}
+
+export default function UserDashboard() {
+    return (
+        <Suspense>
+            <UserDashboardContent />
+        </Suspense>
     );
 }

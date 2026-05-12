@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "./lib/UserContext";
 import FormSelect from "./components/common/FormSelect";
 import Button from "./components/common/Button";
 import { ALL_PUBLIC_KEYS } from "./lib/blockchain/config";
 
-export default function LandingPage() {
+function LandingPageContent() {
     const { login } = useUser();
     const router = useRouter();
     const [pk, setPk] = useState(ALL_PUBLIC_KEYS[0]);
@@ -46,5 +46,13 @@ export default function LandingPage() {
                 <Button label="Login" onClick={handleLogin} />
             </div>
         </main>
+    );
+}
+
+export default function LandingPage() {
+    return (
+        <Suspense>
+            <LandingPageContent />
+        </Suspense>
     );
 }

@@ -37,9 +37,20 @@ type Listing = {
     ext_audio_lowres_hash?: string | null;
     ext_audio_preview_sr?: number | null;
     ext_audio_lowres_sr?: number | null;
+    preview_video_thumb?: string | null;
+    ext_video_thumb_hash?: string | null;
+    preview_video_clip?: string | null;
+    ext_video_clip_hash?: string | null;
+    ext_video_width?: number | null;
+    ext_video_height?: number | null;
+    ext_video_duration?: number | null;
+    ext_video_bitrate?: number | null;
+    ext_video_size?: number | null;
+    ext_video_fps?: number | null;
+    ext_video_clip_frames?: number | null;
 };
 
-type FilterType = "all" | "image" | "audio" | "general";
+type FilterType = "all" | "image" | "audio" | "video" | "general";
 
 function QualityDot({ value }: { value: number | null | undefined }) {
     if (value === null || value === undefined) return null;
@@ -107,6 +118,24 @@ function CardAudio({ src }: { src: string }) {
     return <audio controls src={blobSrc} preload="metadata" style={{ display: "block", width: "100%", height: "36px" }} />;
 }
 
+/** Looping muted video thumbnail card — blob URL so Chrome can seek/know duration. */
+function CardVideo({ src }: { src: string }) {
+    const [blobSrc, setBlobSrc] = useState<string | null>(null);
+    useEffect(() => {
+        const url = dataUrlToObjectUrl(src);
+        setBlobSrc(url);
+        return () => URL.revokeObjectURL(url);
+    }, [src]);
+    if (!blobSrc) return null;
+    return (
+        <video
+            muted autoPlay loop playsInline preload="auto"
+            src={blobSrc}
+            className="w-full h-full object-contain"
+        />
+    );
+}
+
 /** Convert a data: URL to an object URL so the browser can seek / report duration. */
 function dataUrlToObjectUrl(dataUrl: string): string {
     const comma = dataUrl.indexOf(",");
@@ -124,11 +153,15 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
 
     const isImage = listing.listing_type === "image";
     const isAudio = listing.listing_type === "audio";
-    const hasPreview = !!(listing.preview_image || listing.preview_audio || listing.preview_audio_lowres || listing.preview_crop_image);
+    const isVideo = listing.listing_type === "video";
+    const hasPreview = !!(listing.preview_image || listing.preview_audio || listing.preview_audio_lowres || listing.preview_crop_image || listing.preview_video_thumb || listing.preview_video_clip);
 
     // Convert data URLs → Blob URLs for proper browser media handling (seekable, correct duration)
-    const [audioSrc, setAudioSrc]        = useState<string | null>(null);
-    const [audioLowSrc, setAudioLowSrc]  = useState<string | null>(null);
+    const [audioSrc, setAudioSrc]          = useState<string | null>(null);
+    const [audioLowSrc, setAudioLowSrc]    = useState<string | null>(null);
+    const [videoThumbSrc, setVideoThumbSrc] = useState<string | null>(null);
+    const [videoClipSrc, setVideoClipSrc]  = useState<string | null>(null);
+
     useEffect(() => {
         if (!listing.preview_audio) { setAudioSrc(null); return; }
         const url = dataUrlToObjectUrl(listing.preview_audio);
@@ -141,6 +174,18 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
         setAudioLowSrc(url);
         return () => URL.revokeObjectURL(url);
     }, [listing.preview_audio_lowres]);
+    useEffect(() => {
+        if (!listing.preview_video_thumb) { setVideoThumbSrc(null); return; }
+        const url = dataUrlToObjectUrl(listing.preview_video_thumb);
+        setVideoThumbSrc(url);
+        return () => URL.revokeObjectURL(url);
+    }, [listing.preview_video_thumb]);
+    useEffect(() => {
+        if (!listing.preview_video_clip) { setVideoClipSrc(null); return; }
+        const url = dataUrlToObjectUrl(listing.preview_video_clip);
+        setVideoClipSrc(url);
+        return () => URL.revokeObjectURL(url);
+    }, [listing.preview_video_clip]);
 
     // Close on Escape key
     useEffect(() => {
@@ -184,6 +229,16 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
     }
     if (isAudio && listing.ext_audio_lowres_sr != null && listing.ext_audio_duration != null)
         detailRows.push({ label: "Low-res quality", value: `${listing.ext_audio_lowres_sr.toLocaleString()} Hz · Int8 · ${listing.ext_audio_duration}s` });
+    if (isVideo && listing.ext_video_width && listing.ext_video_height)
+        detailRows.push({ label: "Resolution", value: `${listing.ext_video_width} × ${listing.ext_video_height} px` });
+    if (isVideo && listing.ext_video_duration != null)
+        detailRows.push({ label: "Duration", value: formatDuration(listing.ext_video_duration) });
+    if (isVideo && listing.ext_video_bitrate != null)
+        detailRows.push({ label: "Bitrate", value: `${listing.ext_video_bitrate} kbps` });
+    if (isVideo && listing.ext_video_size)
+        detailRows.push({ label: "File size", value: formatFileSize(listing.ext_video_size) });
+    if (isVideo && listing.ext_video_clip_frames != null)
+        detailRows.push({ label: "Clip duration", value: `${listing.ext_video_clip_frames}s` });
 
     return (
         <>
@@ -233,7 +288,15 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
                                 Audio
                             </span>
                         )}
-                        {!isImage && !isAudio && (
+                        {isVideo && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">
+                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                                </svg>
+                                Video
+                            </span>
+                        )}
+                        {!isImage && !isAudio && !isVideo && (
                             <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">
                                 <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
@@ -322,6 +385,49 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
                                             : listing.ext_audio_lowres_sr != null ? ` — ${listing.ext_audio_lowres_sr.toLocaleString()} Hz · Int8` : " (low quality)"}
                                     </p>
                                     <audio controls src={audioLowSrc} preload="metadata" style={{ display: "block", width: "100%", height: "40px" }} />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Video preview */}
+                    {isVideo && (listing.preview_video_thumb || listing.preview_video_clip) && (
+                        <div className="space-y-3">
+                            {/* Playable clip (extended_video_clip / extended_video_both) */}
+                            {videoClipSrc && (
+                                <div className="bg-black">
+                                    <video
+                                        controls
+                                        src={videoClipSrc}
+                                        className="w-full"
+                                        style={{ maxHeight: "340px" }}
+                                        preload="auto"
+                                    />
+                                </div>
+                            )}
+                            {/* Low-res thumbnail video (extended_video / extended_video_both) */}
+                            {videoThumbSrc && (
+                                <div className="px-6 pt-4" onClick={(e) => e.stopPropagation()}>
+                                    <p className="text-xs font-medium text-gray-400 mb-1.5">
+                                        Thumbnail (whole film, low-res)
+                                    </p>
+                                    <video
+                                        controls
+                                        loop
+                                        src={videoThumbSrc}
+                                        className="w-full max-h-48 rounded-lg border border-gray-100 bg-black"
+                                        preload="auto"
+                                    />
+                                </div>
+                            )}
+                            {/* Metadata row */}
+                            {!videoClipSrc && listing.preview_video_thumb && (
+                                <div className="px-6 flex items-center gap-2 text-xs text-rose-600 font-medium">
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                                    </svg>
+                                    {listing.ext_video_duration != null ? formatDuration(listing.ext_video_duration) : "Video"}
+                                    {listing.ext_video_width && listing.ext_video_height ? ` · ${listing.ext_video_width}×${listing.ext_video_height}` : ""}
                                 </div>
                             )}
                         </div>
@@ -487,6 +593,7 @@ export default function MarketplacePage() {
             filter === "all" ||
             (filter === "image"   && l.listing_type === "image") ||
             (filter === "audio"   && l.listing_type === "audio") ||
+            (filter === "video"   && l.listing_type === "video") ||
             (filter === "general" && (!l.listing_type || l.listing_type === "general"));
         return matchesSearch && matchesFilter;
     });
@@ -495,12 +602,13 @@ export default function MarketplacePage() {
         !!user && l.pk_vendor.toLowerCase() === user.publicKey.toLowerCase();
 
     const hasPreview = (l: Listing) =>
-        !!(l.preview_image || l.preview_audio || l.preview_audio_lowres || l.preview_crop_image);
+        !!(l.preview_image || l.preview_audio || l.preview_audio_lowres || l.preview_crop_image || l.preview_video_thumb || l.preview_video_clip);
 
     const counts = {
         all:     listings.length,
         image:   listings.filter(l => l.listing_type === "image").length,
         audio:   listings.filter(l => l.listing_type === "audio").length,
+        video:   listings.filter(l => l.listing_type === "video").length,
         general: listings.filter(l => !l.listing_type || l.listing_type === "general").length,
     };
 
@@ -610,7 +718,7 @@ export default function MarketplacePage() {
 
                 {/* Filter tabs */}
                 <div className="max-w-6xl mx-auto px-6 flex gap-1 pb-0">
-                    {(["all", "image", "audio", "general"] as FilterType[]).map((f) => (
+                    {(["all", "image", "audio", "video", "general"] as FilterType[]).map((f) => (
                         counts[f] > 0 || f === "all" ? (
                         <button
                             key={f}
@@ -621,7 +729,7 @@ export default function MarketplacePage() {
                                     : "border-transparent text-gray-500 hover:text-gray-700"
                             }`}
                         >
-                            {f === "all" ? "All" : f === "image" ? "Images" : f === "audio" ? "Audio" : "Files"}
+                            {f === "all" ? "All" : f === "image" ? "Images" : f === "audio" ? "Audio" : f === "video" ? "Videos" : "Files"}
                             {counts[f] > 0 && (
                                 <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${filter === f ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"}`}>
                                     {counts[f]}
@@ -654,9 +762,11 @@ export default function MarketplacePage() {
                         {filtered.map((listing) => {
                             const isImage = listing.listing_type === "image";
                             const isAudio = listing.listing_type === "audio";
+                            const isVideo = listing.listing_type === "video";
                             const own = isOwnListing(listing);
                             const verified = hasPreview(listing);
                             const mainImage = listing.preview_image ?? listing.preview_crop_image ?? null;
+                            const videoThumb = listing.preview_video_thumb ?? null;
 
                             return (
                                 <div
@@ -679,6 +789,32 @@ export default function MarketplacePage() {
                                                 alt={listing.title}
                                                 className={`w-full h-full group-hover:scale-[1.02] transition-transform duration-300 ${listing.ext_img_width && listing.ext_img_height ? "object-fill" : "object-cover"}`}
                                             />
+                                        </div>
+                                    )}
+
+                                    {/* Video — playable low-res thumbnail on the card */}
+                                    {isVideo && videoThumb && (
+                                        <div className="overflow-hidden bg-gray-900" style={{ height: "160px" }} onClick={(e) => e.stopPropagation()}>
+                                            <CardVideo src={videoThumb} />
+                                        </div>
+                                    )}
+                                    {isVideo && !videoThumb && listing.preview_video_clip && (
+                                        <div className="h-32 bg-gray-900 flex flex-col items-center justify-center gap-2 cursor-pointer">
+                                            <div className="w-12 h-12 rounded-full bg-rose-600/80 flex items-center justify-center group-hover:bg-rose-600 transition-colors">
+                                                <svg className="w-6 h-6 text-white translate-x-0.5" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M8 5v14l11-7z"/>
+                                                </svg>
+                                            </div>
+                                            <span className="text-xs text-gray-400">
+                                                {listing.ext_video_duration != null ? formatDuration(listing.ext_video_duration) : "Click to view"}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {isVideo && !videoThumb && !listing.preview_video_clip && (
+                                        <div className="h-28 bg-gradient-to-r from-rose-50 to-rose-100 flex items-center justify-center gap-2">
+                                            <svg className="w-8 h-8 text-rose-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                                <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                                            </svg>
                                         </div>
                                     )}
 
@@ -710,7 +846,10 @@ export default function MarketplacePage() {
                                             {isAudio && (
                                                 <span className="shrink-0 text-[10px] font-medium text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded-full">Audio</span>
                                             )}
-                                            {!isImage && !isAudio && (
+                                            {isVideo && (
+                                                <span className="shrink-0 text-[10px] font-medium text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-full">Video</span>
+                                            )}
+                                            {!isImage && !isAudio && !isVideo && (
                                                 <span className="shrink-0 text-[10px] font-medium text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full">File</span>
                                             )}
                                             {verified && <VerifiedBadge />}
@@ -725,6 +864,8 @@ export default function MarketplacePage() {
                                                 {isImage && listing.ext_img_size && <span>{formatFileSize(listing.ext_img_size)}</span>}
                                                 {isAudio && listing.ext_audio_duration != null && <span>{formatDuration(listing.ext_audio_duration)}</span>}
                                                 {isAudio && listing.ext_audio_bitrate != null && <span>{listing.ext_audio_bitrate} kbps</span>}
+                                                {isVideo && listing.ext_video_width && listing.ext_video_height && <span>{listing.ext_video_width}×{listing.ext_video_height}</span>}
+                                                {isVideo && listing.ext_video_duration != null && <span>{formatDuration(listing.ext_video_duration)}</span>}
                                                 {isImage && <QualityDot value={listing.brisque_value} />}
                                             </div>
                                             <div className="shrink-0 text-right">

@@ -2,12 +2,12 @@
 
 import Button from "../components/common/Button";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import MyListingsView from "../components/user/MyListingsView";
 import PostListingModal from "../components/user/PostListingModal";
 import { useUser } from "../lib/UserContext";
 
-export default function ListingsPage() {
+function ListingsPageContent() {
     const router = useRouter();
     const { user } = useUser();
     const [modalPostListingShown, showModalPostListing] = useState(false);
@@ -45,5 +45,13 @@ export default function ListingsPage() {
                 />
             )}
         </main>
+    );
+}
+
+export default function ListingsPage() {
+    return (
+        <Suspense>
+            <ListingsPageContent />
+        </Suspense>
     );
 }

@@ -55,6 +55,18 @@ export type Contract = {
     // Audio sample rate fields
     ext_audio_preview_sr?: number | null;
     ext_audio_lowres_sr?: number | null;
+    // Video fields
+    preview_video_thumb?: string | null;
+    ext_video_thumb_hash?: string | null;
+    preview_video_clip?: string | null;
+    ext_video_clip_hash?: string | null;
+    ext_video_width?: number | null;
+    ext_video_height?: number | null;
+    ext_video_duration?: number | null;
+    ext_video_bitrate?: number | null;
+    ext_video_size?: number | null;
+    ext_video_fps?: number | null;
+    ext_video_clip_frames?: number | null;
 };
 
 interface NonAcceptedPrecontractsListViewProps {

@@ -118,61 +118,12 @@ function passArray8ToWasm0(arg, malloc) {
  * @param {Uint8Array} description
  * @returns {Uint8Array}
  */
-export function compile_circuit_extended_audio_lowres_v2_wasm(ct, description) {
+export function compile_circuit_extended_image_dual_v2_wasm(ct, description) {
     const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compile_circuit_extended_audio_lowres_v2_wasm(ptr0, len0, ptr1, len1);
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
-}
-
-/**
- * Compiles an extended-audio V2 circuit from a 76-byte serialised description.
- * @param {Uint8Array} ct
- * @param {Uint8Array} description
- * @returns {Uint8Array}
- */
-export function compile_circuit_extended_audio_v2_wasm(ct, description) {
-    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compile_circuit_extended_audio_v2_wasm(ptr0, len0, ptr1, len1);
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
-}
-
-/**
- * @param {Uint8Array} ct
- * @param {Uint8Array} description
- * @returns {Uint8Array}
- */
-export function compile_circuit_extended_audio_both_v2_wasm(ct, description) {
-    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compile_circuit_extended_audio_both_v2_wasm(ptr0, len0, ptr1, len1);
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
-}
-
-/**
- * @param {Uint8Array} ct
- * @param {Uint8Array} description
- * @returns {Uint8Array}
- */
-export function compile_circuit_extended_image_crop_v2_wasm(ct, description) {
-    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compile_circuit_extended_image_crop_v2_wasm(ptr0, len0, ptr1, len1);
+    const ret = wasm.compile_circuit_extended_image_dual_v2_wasm(ptr0, len0, ptr1, len1);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
@@ -202,24 +153,170 @@ export function compile_circuit_extended_image_v2_wasm(ct, description) {
 
 /**
  * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_audio_lowres_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_audio_lowres_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Compiles an extended-audio V2 circuit from a 76-byte serialised description.
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_audio_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_audio_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Verifies an extended-video-clip V2 precontract commitment.
+ * description must be 132 bytes:
+ *   d_sha(32) || d_clip(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE) || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE)
+ * @param {Uint8Array} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_extended_video_clip_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract_extended_video_clip_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * Computes proofs for step 8b (V2) - corresponds to Step 8b in paper (Section F.2).
+ *
+ * # Arguments
+ * * `circuit_bytes` - Serialized V2 circuit bytes
+ * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
+ * * `ct` - Ciphertext bytes
+ * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
+ *
+ * # Returns
+ * A `FinalStepComponentsV2` containing:
+ * - Gate information (64-byte encoded gate)
+ * - Evaluated values at the challenge point
+ * - Current accumulator value
+ * - Multiple proofs (proof1, proof2, proof_ext)
+ * Note that the returning object will have a proof3 component which is an empty array.
+ *
+ * # Paper Correspondence
+ * This implements Step 8b from the paper: "Case i = 1 following Step 8"
+ * - challenge (code) = 1 corresponds to i = 1 in paper notation
+ * - This case occurs when V said "left" for all challenges (disagreed on every hpre)
+ * - There is no w_{i-1} defined in this case (hpre(0) = ∅ by convention in paper)
+ * @param {Uint8Array} circuit_bytes
+ * @param {Uint8Array} evaluated_circuit_bytes
+ * @param {Uint8Array} ct
+ * @param {number} challenge
+ * @returns {FinalStepComponentsV2}
+ */
+export function compute_proofs_left_v2(circuit_bytes, evaluated_circuit_bytes, ct, challenge) {
+    const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_proofs_left_v2(ptr0, len0, ptr1, len1, ptr2, len2, challenge);
+    return FinalStepComponentsV2.__wrap(ret);
+}
+
+/**
+ * Computes the proof for step 8c.
+ *
+ * # Arguments
+ * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
+ * * `num_blocks` - Number of blocks for the ciphertext
+ * * `num_gates` - Total number of gates in the circuit
+ *
+ * # Returns
+ * A JavaScript `Array` containing the proof
+ * @param {Uint8Array} evaluated_circuit_bytes
+ * @param {number} num_blocks
+ * @param {number} num_gates
+ * @returns {Array<any>}
+ */
+export function compute_proof_right(evaluated_circuit_bytes, num_blocks, num_gates) {
+    const ptr0 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_proof_right(ptr0, len0, num_blocks, num_gates);
+    return ret;
+}
+
+/**
+ * @param {Uint8Array} ct
  * @param {Uint8Array} key
  * @param {Uint8Array} description
  * @returns {CheckCtResult}
  */
-export function check_received_ct_key_extended_image_dual_v2(ct, key, description) {
+export function check_received_ct_key_extended_image_crop_v2(ct, key, description) {
     var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
     var len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key_extended_image_dual_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    const ret = wasm.check_received_ct_key_extended_image_crop_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
     return CheckCtResult.__wrap(ret);
 }
 
 /**
+ * Computes precontract for a both-audio container (format 0x03).
+ * description = d_sha(32) || d_crop(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE) = 112 bytes.
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_crop
+ * @param {Uint8Array} d_lowres
+ * @param {number} d_duration
+ * @param {number} d_bitrate
+ * @param {number} d_size
+ * @param {number} d_total_samples
+ * @returns {Precontract}
+ */
+export function compute_precontract_extended_audio_both_v2(file, key, d_sha, d_crop, d_lowres, d_duration, d_bitrate, d_size, d_total_samples) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray8ToWasm0(d_lowres, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_audio_both_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, d_duration, d_bitrate, d_size, d_total_samples);
+    return Precontract.__wrap(ret);
+}
+
+/**
  * Verifies an extended-audio-both V2 precontract commitment.
- * description must be 108 bytes: d_sha(32) || d_preview(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE).
+ * description must be 112 bytes: d_sha(32) || d_crop(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE).
  * @param {Uint8Array} description
  * @param {string} commitment
  * @param {string} opening_value
@@ -239,6 +336,446 @@ export function check_precontract_extended_audio_both_v2(description, commitment
     return CheckPrecontractResult.__wrap(ret);
 }
 
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+/**
+ * Verifies an extended-image-dual V2 precontract commitment.
+ * description must be 116 bytes: d_sha(32) || d_thumb(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE) || crop_x(4BE) || crop_y(4BE).
+ * @param {Uint8Array} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_extended_image_dual_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract_extended_image_dual_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * Computes proofs for step 8a (V2) - corresponds to Step 8a in paper (Section F.2).
+ *
+ * # Arguments
+ * * `circuit_bytes` - Serialized V2 circuit bytes
+ * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
+ * * `ct` - Ciphertext bytes
+ * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
+ *
+ * # Returns
+ * A `FinalStepComponentsV2` containing:
+ * - Gate information (64-byte encoded gate)
+ * - Evaluated values at the challenge point
+ * - Current accumulator value
+ * - Multiple proofs (proof1, proof2, proof3, proof_ext)
+ *
+ * # Paper Correspondence
+ * This implements Step 8a from the paper: "Case 1 < i ≤ n following Step 8"
+ * - challenge (code) = i (paper), where 1 < i ≤ n in paper notation
+ * - So challenge must satisfy: 1 < challenge ≤ numGates
+ * - The gate g_i in paper corresponds to circuit.gates[challenge - 1] in code (converting 1-indexed to 0-indexed)
+ * @param {Uint8Array} circuit_bytes
+ * @param {Uint8Array} evaluated_circuit_bytes
+ * @param {Uint8Array} ct
+ * @param {number} challenge
+ * @returns {FinalStepComponentsV2}
+ */
+export function compute_proofs_v2(circuit_bytes, evaluated_circuit_bytes, ct, challenge) {
+    const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_proofs_v2(ptr0, len0, ptr1, len1, ptr2, len2, challenge);
+    return FinalStepComponentsV2.__wrap(ret);
+}
+
+/**
+ * Verifies a dispute argument.
+ *
+ * # Arguments
+ * * `argument_bin` - Serialized dispute argument bytes
+ * * `commitment` - Commitment in hex format
+ * * `description` - Description hash in hex format
+ * * `key` - Encryption key in hex format
+ *
+ * # Returns
+ * An `ArgumentCheckResult` containing the verification results
+ * @param {Uint8Array} argument_bin
+ * @param {string} commitment
+ * @param {string} description
+ * @param {string} key
+ * @returns {ArgumentCheckResult}
+ */
+export function check_argument(argument_bin, commitment, description, key) {
+    const ptr0 = passArray8ToWasm0(argument_bin, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_argument(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return ArgumentCheckResult.__wrap(ret);
+}
+
+/**
+ * Verifies a V2 precontract by checking the commitment and description with respect to the
+ * received ciphertext, using the V2 circuit.
+ *
+ * # Arguments
+ * * `description` - Hex-encoded description hash
+ * * `commitment` - Hex-encoded commitment
+ * * `opening_value` - Hex-encoded opening value
+ * * `ct` - Ciphertext bytes
+ *
+ * # Returns
+ * A `CheckPrecontractResult` containing the verification status and hash values
+ * @param {string} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * Computes precontract for a video-clip container (format 0x02).
+ * description = d_sha(32) || d_clip(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *              || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE) = 132 bytes.
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_clip
+ * @param {Uint8Array} d_crop
+ * @param {number} d_size
+ * @param {number} d_duration
+ * @param {number} d_bitrate
+ * @param {number} d_width
+ * @param {number} d_height
+ * @param {number} d_fps
+ * @param {number} d_sr
+ * @param {number} d_n_samp
+ * @param {number} d_clip_frames
+ * @returns {Precontract}
+ */
+export function compute_precontract_extended_video_clip_v2(file, key, d_sha, d_clip, d_crop, d_size, d_duration, d_bitrate, d_width, d_height, d_fps, d_sr, d_n_samp, d_clip_frames) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(d_clip, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_video_clip_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, d_size, d_duration, d_bitrate, d_width, d_height, d_fps, d_sr, d_n_samp, d_clip_frames);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_image_dual_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_image_dual_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_video_both_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_video_both_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
+ * Computes precontract for a crop-preview image container (format 0x02).
+ * description = d_sha(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE)
+ *             || crop_x(4BE) || crop_y(4BE) = 84 bytes.
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_crop
+ * @param {number} d_width
+ * @param {number} d_height
+ * @param {number} d_size
+ * @param {number} crop_x
+ * @param {number} crop_y
+ * @returns {Precontract}
+ */
+export function compute_precontract_extended_image_crop_v2(file, key, d_sha, d_crop, d_width, d_height, d_size, crop_x, crop_y) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_image_crop_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_width, d_height, d_size, crop_x, crop_y);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * Computes the proof for step 8c (V2) - corresponds to Step 8c in paper (Section F.2).
+ *
+ * # Arguments
+ * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
+ * * `num_blocks` - Number of blocks for the ciphertext
+ * * `num_gates` - Total number of gates in the circuit (n in paper notation)
+ *
+ * # Returns
+ * A JavaScript `Array` containing the proof
+ *
+ * # Paper Correspondence
+ * This implements Step 8c from the paper: "Case i = n + 1 following Step 8"
+ * - challenge (code) = numGates corresponds to i = n + 1 in paper notation
+ * - This case occurs when V said "right" for all challenges (agreed on every hpre)
+ * - The proof verifies that val(n) is correct (the final gate output)
+ * @param {Uint8Array} evaluated_circuit_bytes
+ * @param {number} num_blocks
+ * @param {number} num_gates
+ * @returns {Array<any>}
+ */
+export function compute_proof_right_v2(evaluated_circuit_bytes, num_blocks, num_gates) {
+    const ptr0 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_proof_right_v2(ptr0, len0, num_blocks, num_gates);
+    return ret;
+}
+
+/**
+ * Verifies an extended-video V2 precontract commitment.
+ * description must be 128 bytes:
+ *   d_sha(32) || d_thumb(32) || d_lowres(32) || size(4BE) || duration(4BE) || bitrate(4BE) || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE)
+ * @param {Uint8Array} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_extended_video_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract_extended_video_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_image_crop_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_image_crop_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_audio_lowres_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_audio_lowres_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
+ * Creates a dispute argument from the given components.
+ *
+ * # Arguments
+ * * `ct` - Ciphertext bytes
+ * * `description` - Description hash in hex format
+ * * `opening_value` - Opening value in hex format
+ *
+ * # Returns
+ * Serialized dispute argument bytes
+ * @param {Uint8Array} ct
+ * @param {string} description
+ * @param {string} opening_value
+ * @returns {Uint8Array}
+ */
+export function make_argument(ct, description, opening_value) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.make_argument(ptr0, len0, ptr1, len1, ptr2, len2);
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
+ * Computes precontract for a video-both container (format 0x03).
+ * description = d_sha(32) || d_thumb(32) || d_clip(32) || d_lowres(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *              || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE) = 196 bytes.
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_thumb
+ * @param {Uint8Array} d_clip
+ * @param {Uint8Array} d_lowres
+ * @param {Uint8Array} d_crop
+ * @param {number} d_size
+ * @param {number} d_duration
+ * @param {number} d_bitrate
+ * @param {number} d_width
+ * @param {number} d_height
+ * @param {number} d_fps
+ * @param {number} d_sr
+ * @param {number} d_n_samp
+ * @param {number} d_clip_frames
+ * @returns {Precontract}
+ */
+export function compute_precontract_extended_video_both_v2(file, key, d_sha, d_thumb, d_clip, d_lowres, d_crop, d_size, d_duration, d_bitrate, d_width, d_height, d_fps, d_sr, d_n_samp, d_clip_frames) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(d_thumb, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray8ToWasm0(d_clip, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ptr5 = passArray8ToWasm0(d_lowres, wasm.__wbindgen_malloc);
+    const len5 = WASM_VECTOR_LEN;
+    const ptr6 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
+    const len6 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_video_both_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, d_size, d_duration, d_bitrate, d_width, d_height, d_fps, d_sr, d_n_samp, d_clip_frames);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * Decrypts a ciphertext and verifies all extended-image description components.
+ * Computes the NN thumbnail from the BMP pixel data (same algorithm as the circuit)
+ * and verifies SHA256(computed_thumb) = d_thumb.
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_image_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_image_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
+ * Computes proofs for step 8b.
+ *
+ * # Arguments
+ * * `circuit_bytes` - Serialized circuit bytes
+ * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
+ * * `ct` - Ciphertext bytes
+ * * `challenge` - Challenge point in the circuit
+ *
+ * # Returns
+ * A `FinalStepComponents` containing:
+ * - Gate information for the challenge point
+ * - Evaluated values at the challenge point
+ * - Current accumulator value
+ * - Multiple proofs (proof1, proof2, proof_ext)
+ * Note that the returning object will have a proof3 component which is an empty array.
+ * @param {Uint8Array} circuit_bytes
+ * @param {Uint8Array} evaluated_circuit_bytes
+ * @param {Uint8Array} ct
+ * @param {number} challenge
+ * @returns {FinalStepComponents}
+ */
+export function compute_proofs_left(circuit_bytes, evaluated_circuit_bytes, ct, challenge) {
+    const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_proofs_left(ptr0, len0, ptr1, len1, ptr2, len2, challenge);
+    return FinalStepComponents.__wrap(ret);
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_export_2.get(mem.getUint32(i, true)));
+    }
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
+}
+
 function passArrayJsValueToWasm0(array, malloc) {
     const ptr = malloc(array.length * 4, 4) >>> 0;
     for (let i = 0; i < array.length; i++) {
@@ -249,38 +786,189 @@ function passArrayJsValueToWasm0(array, malloc) {
     return ptr;
 }
 /**
- * Evaluates a circuit with the given ciphertext, constants, and description.
+ * Computes precontract for a dual-preview image container (format 0x03).
+ * description = d_sha(32) || d_thumb(32) || d_crop(32) || imgW(4BE) || imgH(4BE)
+ *             || size(4BE) || crop_x(4BE) || crop_y(4BE) = 116 bytes.
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_thumb
+ * @param {Uint8Array} d_crop
+ * @param {number} d_width
+ * @param {number} d_height
+ * @param {number} d_size
+ * @param {number} crop_x
+ * @param {number} crop_y
+ * @returns {Precontract}
+ */
+export function compute_precontract_extended_image_dual_v2(file, key, d_sha, d_thumb, d_crop, d_width, d_height, d_size, crop_x, crop_y) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(d_thumb, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_image_dual_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, d_width, d_height, d_size, crop_x, crop_y);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * Computes precontract values for V2 circuit. This includes encryption, V2 circuit compilation,
+ * and commitment generation.
  *
  * # Arguments
- * * `circuit_bytes` - Serialized circuit bytes. If empty, a new basic circuit will be compiled
- * * `ct` - Ciphertext bytes to evaluate
- * * `constants` - Vector of hex-encoded constant values
- * * `description` - Description hash in hex format
+ * * `file` - The file data to be encrypted
+ * * `key` - The encryption key
  *
  * # Returns
- * An `EvaluatedCircuit` containing the evaluation results and circuit constants
- *
- * # Details
- * This function either uses an existing circuit (from circuit_bytes) or creates a new basic circuit
- * based on the ciphertext length and description. It then evaluates the circuit with the given
- * ciphertext and constants.
- * @param {Uint8Array} circuit_bytes
- * @param {Uint8Array} ct
- * @param {string[]} constants
- * @param {string} description
- * @returns {EvaluatedCircuit}
+ * A `Precontract` containing all necessary components for the optimistic phase of the protocol
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @returns {Precontract}
  */
-export function evaluate_circuit(circuit_bytes, ct, constants, description) {
-    const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+export function compute_precontract_values_v2(file, key) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArrayJsValueToWasm0(constants, wasm.__wbindgen_malloc);
+    const ret = wasm.compute_precontract_values_v2(ptr0, len0, file, ptr1, len1);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_video_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_video_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Verifies an extended-image V2 precontract commitment.
+ * description (hex) must encode 76 bytes: d_sha(32) || d_thumb(32) || w(4BE) || h(4BE) || size(4BE).
+ * @param {Uint8Array} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_extended_image_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.evaluate_circuit(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return EvaluatedCircuit.__wrap(ret);
+    const ret = wasm.check_precontract_extended_image_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_audio_both_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_audio_both_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Verifies an extended-image-crop V2 precontract commitment.
+ * description must be 84 bytes: d_sha(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE) || crop_x(4BE) || crop_y(4BE).
+ * @param {Uint8Array} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_extended_image_crop_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract_extended_image_crop_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_video_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_video_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
+ * Computes precontract values for a file. This includes encryption, circuit compilation,
+ * and commitment generation.
+ *
+ * # Arguments
+ * * `file` - The file data to be encrypted
+ * * `key` - The encryption key
+ *
+ * # Returns
+ * A `Precontract` containing all necessary components for the optimistic phase of the protocol
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @returns {Precontract}
+ */
+export function compute_precontract_values(file, key) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_values(ptr0, len0, file, ptr1, len1);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_video_both_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_video_both_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
 }
 
 /**
@@ -324,6 +1012,135 @@ export function hpre_v2(evaluated_circuit_bytes, num_blocks, challenge) {
 }
 
 /**
+ * Verifies a precontract by checking the commitment and description with respect to the received
+ * ciphertext.
+ *
+ * # Arguments
+ * * `description` - Hex-encoded description hash
+ * * `commitment` - Hex-encoded commitment
+ * * `opening_value` - Hex-encoded opening value
+ * * `ct` - Ciphertext bytes
+ *
+ * # Returns
+ * A `CheckPrecontractResult` containing the verification status and hash values
+ * @param {string} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract(description, commitment, opening_value, ct) {
+    const ptr0 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * Compiles a V2 circuit from ciphertext and description.
+ *
+ * # Arguments
+ * * `ct` - Ciphertext bytes (must include 16-byte IV)
+ * * `description` - Description hash as hex string
+ *
+ * # Returns
+ * Serialized CompiledCircuitV2 bytes
+ * @param {Uint8Array} ct
+ * @param {string} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Verifies an extended-video-both V2 precontract commitment.
+ * description must be 196 bytes:
+ *   d_sha(32) || d_thumb(32) || d_clip(32) || d_lowres(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *   || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) || clip_frames(4BE)
+ * @param {Uint8Array} description
+ * @param {string} commitment
+ * @param {string} opening_value
+ * @param {Uint8Array} ct
+ * @returns {CheckPrecontractResult}
+ */
+export function check_precontract_extended_video_both_v2(description, commitment, opening_value, ct) {
+    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.check_precontract_extended_video_both_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return CheckPrecontractResult.__wrap(ret);
+}
+
+/**
+ * Computes precontract values for an image using the extended description circuit.
+ *
+ * Container layout (file = x = what the vendor encrypts and sells):
+ *   bytes   0– 63: header (format 1B | size 4B | width 4B | height 4B | reserved 51B)
+ *   bytes  64+   : standard BMP file (no thumbnail segment embedded)
+ *
+ * The circuit computes the 256×256 NN thumbnail directly from the BMP pixel data.
+ * d_thumb must be SHA256(NN thumbnail computed the same way as the circuit — nearest-neighbour
+ * with source pixel (ox*W/256, oy*H/256) and BGR byte order matching BMP storage).
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_thumb
+ * @param {number} d_width
+ * @param {number} d_height
+ * @param {number} d_format
+ * @param {number} d_size
+ * @returns {Precontract}
+ */
+export function compute_precontract_extended_image_v2(file, key, d_sha, d_thumb, d_width, d_height, d_format, d_size) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(d_thumb, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_image_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_width, d_height, d_format, d_size);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_audio_both_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_audio_both_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
  * Computes proofs for step 8a.
  *
  * # Arguments
@@ -356,15 +1173,33 @@ export function compute_proofs(circuit_bytes, evaluated_circuit_bytes, ct, chall
 }
 
 /**
- * Verifies an extended-image-dual V2 precontract commitment.
- * description must be 108 bytes: d_sha(32) || d_thumb(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE).
+ * Decrypts a ciphertext and verifies all extended-audio description components.
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_audio_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_audio_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
+}
+
+/**
+ * Verifies an extended-audio-lowres V2 precontract commitment.
+ * description must be 80 bytes: d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE).
  * @param {Uint8Array} description
  * @param {string} commitment
  * @param {string} opening_value
  * @param {Uint8Array} ct
  * @returns {CheckPrecontractResult}
  */
-export function check_precontract_extended_image_dual_v2(description, commitment, opening_value, ct) {
+export function check_precontract_extended_audio_lowres_v2(description, commitment, opening_value, ct) {
     const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -373,100 +1208,59 @@ export function check_precontract_extended_image_dual_v2(description, commitment
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_precontract_extended_image_dual_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    const ret = wasm.check_precontract_extended_audio_lowres_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
     return CheckPrecontractResult.__wrap(ret);
 }
 
 /**
- * Creates a dispute argument from the given components.
- *
- * # Arguments
- * * `ct` - Ciphertext bytes
- * * `description` - Description hash in hex format
- * * `opening_value` - Opening value in hex format
- *
- * # Returns
- * Serialized dispute argument bytes
- * @param {Uint8Array} ct
- * @param {string} description
- * @param {string} opening_value
- * @returns {Uint8Array}
+ * Computes precontract for a video-thumb container (format 0x01).
+ * description = d_sha(32) || d_thumb(32) || d_audio(32) || size(4BE) || duration(4BE) || bitrate(4BE)
+ *              || width(4BE) || height(4BE) || fps(4BE) || sr(4BE) || n_samp(4BE) = 128 bytes.
+ * @param {Uint8Array} file
+ * @param {Uint8Array} key
+ * @param {Uint8Array} d_sha
+ * @param {Uint8Array} d_thumb
+ * @param {Uint8Array} d_lowres
+ * @param {number} d_size
+ * @param {number} d_duration
+ * @param {number} d_bitrate
+ * @param {number} d_width
+ * @param {number} d_height
+ * @param {number} d_fps
+ * @param {number} d_sr
+ * @param {number} d_n_samp
+ * @returns {Precontract}
  */
-export function make_argument(ct, description, opening_value) {
-    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+export function compute_precontract_extended_video_v2(file, key, d_sha, d_thumb, d_lowres, d_size, d_duration, d_bitrate, d_width, d_height, d_fps, d_sr, d_n_samp) {
+    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.make_argument(ptr0, len0, ptr1, len1, ptr2, len2);
-    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v4;
-}
-
-/**
- * Computes proofs for step 8b.
- *
- * # Arguments
- * * `circuit_bytes` - Serialized circuit bytes
- * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
- * * `ct` - Ciphertext bytes
- * * `challenge` - Challenge point in the circuit
- *
- * # Returns
- * A `FinalStepComponents` containing:
- * - Gate information for the challenge point
- * - Evaluated values at the challenge point
- * - Current accumulator value
- * - Multiple proofs (proof1, proof2, proof_ext)
- * Note that the returning object will have a proof3 component which is an empty array.
- * @param {Uint8Array} circuit_bytes
- * @param {Uint8Array} evaluated_circuit_bytes
- * @param {Uint8Array} ct
- * @param {number} challenge
- * @returns {FinalStepComponents}
- */
-export function compute_proofs_left(circuit_bytes, evaluated_circuit_bytes, ct, challenge) {
-    const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_proofs_left(ptr0, len0, ptr1, len1, ptr2, len2, challenge);
-    return FinalStepComponents.__wrap(ret);
-}
-
-/**
- * Verifies a V2 precontract by checking the commitment and description with respect to the
- * received ciphertext, using the V2 circuit.
- *
- * # Arguments
- * * `description` - Hex-encoded description hash
- * * `commitment` - Hex-encoded commitment
- * * `opening_value` - Hex-encoded opening value
- * * `ct` - Ciphertext bytes
- *
- * # Returns
- * A `CheckPrecontractResult` containing the verification status and hash values
- * @param {string} description
- * @param {string} commitment
- * @param {string} opening_value
- * @param {Uint8Array} ct
- * @returns {CheckPrecontractResult}
- */
-export function check_precontract_v2(description, commitment, opening_value, ct) {
-    const ptr0 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const ptr3 = passArray8ToWasm0(d_thumb, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_precontract_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return CheckPrecontractResult.__wrap(ret);
+    const ptr4 = passArray8ToWasm0(d_lowres, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_precontract_extended_video_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, d_size, d_duration, d_bitrate, d_width, d_height, d_fps, d_sr, d_n_samp);
+    return Precontract.__wrap(ret);
+}
+
+/**
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} key
+ * @param {Uint8Array} description
+ * @returns {CheckCtResult}
+ */
+export function check_received_ct_key_extended_video_clip_v2(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.check_received_ct_key_extended_video_clip_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
 }
 
 /**
@@ -494,225 +1288,8 @@ export function hpre(evaluated_circuit_bytes, num_blocks, challenge) {
 }
 
 /**
- * @param {Uint8Array} ct
- * @param {Uint8Array} key
- * @param {Uint8Array} description
- * @returns {CheckCtResult}
- */
-export function check_received_ct_key_extended_audio_lowres_v2(ct, key, description) {
-    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key_extended_audio_lowres_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
-    return CheckCtResult.__wrap(ret);
-}
-
-/**
- * Verifies ciphertext decryption by checking against the description.
- *
- * # Arguments
- * * `ct` - Ciphertext bytes to decrypt
- * * `key` - Decryption key
- * * `description` - Expected description hash in hex
- *
- * # Returns
- * A `CheckCtResult` containing the verification status and decrypted data
- * @param {Uint8Array} ct
- * @param {Uint8Array} key
- * @param {string} description
- * @returns {CheckCtResult}
- */
-export function check_received_ct_key(ct, key, description) {
-    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key(ptr0, len0, ct, ptr1, len1, ptr2, len2);
-    return CheckCtResult.__wrap(ret);
-}
-
-/**
- * Computes precontract for a dual-preview image container (format 0x03).
- * description = d_sha(32) || d_thumb(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE) = 108 bytes.
- * @param {Uint8Array} file
- * @param {Uint8Array} key
- * @param {Uint8Array} d_sha
- * @param {Uint8Array} d_thumb
- * @param {Uint8Array} d_crop
- * @param {number} d_width
- * @param {number} d_height
- * @param {number} d_size
- * @returns {Precontract}
- */
-export function compute_precontract_extended_image_dual_v2(file, key, d_sha, d_thumb, d_crop, d_width, d_height, d_size) {
-    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(d_thumb, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ptr4 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
-    const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_extended_image_dual_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, d_width, d_height, d_size);
-    return Precontract.__wrap(ret);
-}
-
-/**
- * @param {Uint8Array} ct
- * @param {Uint8Array} description
- * @returns {Uint8Array}
- */
-export function compile_circuit_extended_image_dual_v2_wasm(ct, description) {
-    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compile_circuit_extended_image_dual_v2_wasm(ptr0, len0, ptr1, len1);
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
-}
-
-/**
- * @param {Uint8Array} ct
- * @param {Uint8Array} key
- * @param {Uint8Array} description
- * @returns {CheckCtResult}
- */
-export function check_received_ct_key_extended_audio_both_v2(ct, key, description) {
-    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key_extended_audio_both_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
-    return CheckCtResult.__wrap(ret);
-}
-
-/**
- * Verifies a dispute argument.
- *
- * # Arguments
- * * `argument_bin` - Serialized dispute argument bytes
- * * `commitment` - Commitment in hex format
- * * `description` - Description hash in hex format
- * * `key` - Encryption key in hex format
- *
- * # Returns
- * An `ArgumentCheckResult` containing the verification results
- * @param {Uint8Array} argument_bin
- * @param {string} commitment
- * @param {string} description
- * @param {string} key
- * @returns {ArgumentCheckResult}
- */
-export function check_argument(argument_bin, commitment, description, key) {
-    const ptr0 = passArray8ToWasm0(argument_bin, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_argument(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return ArgumentCheckResult.__wrap(ret);
-}
-
-/**
- * Decrypts a ciphertext and verifies all extended-audio description components.
- * @param {Uint8Array} ct
- * @param {Uint8Array} key
- * @param {Uint8Array} description
- * @returns {CheckCtResult}
- */
-export function check_received_ct_key_extended_audio_v2(ct, key, description) {
-    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key_extended_audio_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
-    return CheckCtResult.__wrap(ret);
-}
-
-/**
- * Computes precontract values for an image using the extended description circuit.
- *
- * The ciphertext must wrap a BMP container:
- *   bytes   0– 63: header (format 1B | size 4B | width 4B | height 4B | reserved 51B)
- *   bytes  64–196671: 256×256 raw-RGB thumbnail
- *   bytes 196672+  : BMP pixel data
- *
- * # Arguments
- * * `file`       - Plaintext file bytes (in BMP container format)
- * * `key`        - AES-128 encryption key (16 bytes)
- * * `d_sha`      - SHA256(file) — 32 bytes
- * * `d_thumb`    - SHA256(thumbnail bytes 64..196672) — 32 bytes
- * * `d_width`    - Image width in pixels
- * * `d_height`   - Image height in pixels
- * * `d_format`   - Format tag (0 = BMP)
- * * `d_size`     - File size in bytes
- *
- * # Returns
- * A `Precontract` with the extended-image circuit committed.
- * @param {Uint8Array} file
- * @param {Uint8Array} key
- * @param {Uint8Array} d_sha
- * @param {Uint8Array} d_thumb
- * @param {number} d_width
- * @param {number} d_height
- * @param {number} d_format
- * @param {number} d_size
- * @returns {Precontract}
- */
-export function compute_precontract_extended_image_v2(file, key, d_sha, d_thumb, d_width, d_height, d_format, d_size) {
-    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(d_thumb, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_extended_image_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_width, d_height, d_format, d_size);
-    return Precontract.__wrap(ret);
-}
-
-/**
- * Computes the proof for step 8c.
- *
- * # Arguments
- * * `evaluated_circuit_bytes` - Serialized evaluated circuit bytes
- * * `num_blocks` - Number of blocks for the ciphertext
- * * `num_gates` - Total number of gates in the circuit
- *
- * # Returns
- * A JavaScript `Array` containing the proof
- * @param {Uint8Array} evaluated_circuit_bytes
- * @param {number} num_blocks
- * @param {number} num_gates
- * @returns {Array<any>}
- */
-export function compute_proof_right(evaluated_circuit_bytes, num_blocks, num_gates) {
-    const ptr0 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_proof_right(ptr0, len0, num_blocks, num_gates);
-    return ret;
-}
-
-/**
  * Computes precontract for a low-res-full audio container (format 0x02).
- * description = d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) = 76 bytes.
+ * description = d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) || total_samples(4BE) = 80 bytes.
  * @param {Uint8Array} file
  * @param {Uint8Array} key
  * @param {Uint8Array} d_sha
@@ -720,9 +1297,10 @@ export function compute_proof_right(evaluated_circuit_bytes, num_blocks, num_gat
  * @param {number} d_duration
  * @param {number} d_bitrate
  * @param {number} d_size
+ * @param {number} d_total_samples
  * @returns {Precontract}
  */
-export function compute_precontract_extended_audio_lowres_v2(file, key, d_sha, d_lowres, d_duration, d_bitrate, d_size) {
+export function compute_precontract_extended_audio_lowres_v2(file, key, d_sha, d_lowres, d_duration, d_bitrate, d_size, d_total_samples) {
     var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
     var len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
@@ -731,7 +1309,7 @@ export function compute_precontract_extended_audio_lowres_v2(file, key, d_sha, d
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArray8ToWasm0(d_lowres, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_extended_audio_lowres_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_duration, d_bitrate, d_size);
+    const ret = wasm.compute_precontract_extended_audio_lowres_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_duration, d_bitrate, d_size, d_total_samples);
     return Precontract.__wrap(ret);
 }
 
@@ -763,320 +1341,8 @@ export function evaluate_circuit_v2_wasm(circuit_bytes, ct, key) {
 }
 
 /**
- * Decrypts a ciphertext and verifies all extended-image description components:
- *   SHA256(x), SHA256(thumb), width, height, size — against the 76-byte description tuple.
- * @param {Uint8Array} ct
- * @param {Uint8Array} key
- * @param {Uint8Array} description
- * @returns {CheckCtResult}
- */
-export function check_received_ct_key_extended_image_v2(ct, key, description) {
-    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key_extended_image_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
-    return CheckCtResult.__wrap(ret);
-}
-
-/**
- * Computes the proof for step 8c (V2) - corresponds to Step 8c in paper (Section F.2).
- *
- * # Arguments
- * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
- * * `num_blocks` - Number of blocks for the ciphertext
- * * `num_gates` - Total number of gates in the circuit (n in paper notation)
- *
- * # Returns
- * A JavaScript `Array` containing the proof
- *
- * # Paper Correspondence
- * This implements Step 8c from the paper: "Case i = n + 1 following Step 8"
- * - challenge (code) = numGates corresponds to i = n + 1 in paper notation
- * - This case occurs when V said "right" for all challenges (agreed on every hpre)
- * - The proof verifies that val(n) is correct (the final gate output)
- * @param {Uint8Array} evaluated_circuit_bytes
- * @param {number} num_blocks
- * @param {number} num_gates
- * @returns {Array<any>}
- */
-export function compute_proof_right_v2(evaluated_circuit_bytes, num_blocks, num_gates) {
-    const ptr0 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_proof_right_v2(ptr0, len0, num_blocks, num_gates);
-    return ret;
-}
-
-/**
- * Verifies an extended-image V2 precontract commitment.
- * description (hex) must encode 76 bytes: d_sha(32) || d_thumb(32) || w(4BE) || h(4BE) || size(4BE).
- * @param {Uint8Array} description
- * @param {string} commitment
- * @param {string} opening_value
- * @param {Uint8Array} ct
- * @returns {CheckPrecontractResult}
- */
-export function check_precontract_extended_image_v2(description, commitment, opening_value, ct) {
-    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_precontract_extended_image_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return CheckPrecontractResult.__wrap(ret);
-}
-
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
-}
-/**
- * Verifies an extended-image-crop V2 precontract commitment.
- * description must be 76 bytes: d_sha(32) || d_crop(32) || w(4BE) || h(4BE) || size(4BE).
- * @param {Uint8Array} description
- * @param {string} commitment
- * @param {string} opening_value
- * @param {Uint8Array} ct
- * @returns {CheckPrecontractResult}
- */
-export function check_precontract_extended_image_crop_v2(description, commitment, opening_value, ct) {
-    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_precontract_extended_image_crop_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return CheckPrecontractResult.__wrap(ret);
-}
-
-/**
- * Computes precontract values for a file. This includes encryption, circuit compilation,
- * and commitment generation.
- *
- * # Arguments
- * * `file` - The file data to be encrypted
- * * `key` - The encryption key
- *
- * # Returns
- * A `Precontract` containing all necessary components for the optimistic phase of the protocol
- * @param {Uint8Array} file
- * @param {Uint8Array} key
- * @returns {Precontract}
- */
-export function compute_precontract_values(file, key) {
-    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_values(ptr0, len0, file, ptr1, len1);
-    return Precontract.__wrap(ret);
-}
-
-/**
- * Verifies a precontract by checking the commitment and description with respect to the received
- * ciphertext.
- *
- * # Arguments
- * * `description` - Hex-encoded description hash
- * * `commitment` - Hex-encoded commitment
- * * `opening_value` - Hex-encoded opening value
- * * `ct` - Ciphertext bytes
- *
- * # Returns
- * A `CheckPrecontractResult` containing the verification status and hash values
- * @param {string} description
- * @param {string} commitment
- * @param {string} opening_value
- * @param {Uint8Array} ct
- * @returns {CheckPrecontractResult}
- */
-export function check_precontract(description, commitment, opening_value, ct) {
-    const ptr0 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_precontract(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return CheckPrecontractResult.__wrap(ret);
-}
-
-function getArrayJsValueFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    const mem = getDataViewMemory0();
-    const result = [];
-    for (let i = ptr; i < ptr + 4 * len; i += 4) {
-        result.push(wasm.__wbindgen_export_2.get(mem.getUint32(i, true)));
-    }
-    wasm.__externref_drop_slice(ptr, len);
-    return result;
-}
-/**
- * Computes precontract values for an audio file using the extended audio description circuit.
- *
- * The plaintext must be a canonical audio container:
- *   bytes   0– 63  : header (format=0x01 | size 4B BE | duration_secs 4B BE | bitrate_kbps 4B BE | reserved 51B)
- *   bytes  64–480063: 30s × 8kHz mono Int16-LE PCM preview (480 000 bytes)
- *   bytes 480064+  : original audio file bytes
- *
- * # Arguments
- * * `file`       - Plaintext container bytes
- * * `key`        - AES-128 key (16 bytes)
- * * `d_sha`      - SHA256(file) — 32 bytes
- * * `d_preview`  - SHA256(preview PCM bytes 64..480064) — 32 bytes
- * * `d_duration` - Total duration in seconds
- * * `d_bitrate`  - Encoding bitrate in kbps
- * * `d_size`     - Container size in bytes
- * @param {Uint8Array} file
- * @param {Uint8Array} key
- * @param {Uint8Array} d_sha
- * @param {Uint8Array} d_preview
- * @param {number} d_duration
- * @param {number} d_bitrate
- * @param {number} d_size
- * @returns {Precontract}
- */
-export function compute_precontract_extended_audio_v2(file, key, d_sha, d_preview, d_duration, d_bitrate, d_size) {
-    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(d_preview, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_extended_audio_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_duration, d_bitrate, d_size);
-    return Precontract.__wrap(ret);
-}
-
-/**
- * Computes precontract values for V2 circuit. This includes encryption, V2 circuit compilation,
- * and commitment generation.
- *
- * # Arguments
- * * `file` - The file data to be encrypted
- * * `key` - The encryption key
- *
- * # Returns
- * A `Precontract` containing all necessary components for the optimistic phase of the protocol
- * @param {Uint8Array} file
- * @param {Uint8Array} key
- * @returns {Precontract}
- */
-export function compute_precontract_values_v2(file, key) {
-    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_values_v2(ptr0, len0, file, ptr1, len1);
-    return Precontract.__wrap(ret);
-}
-
-/**
- * @param {Uint8Array} ct
- * @param {Uint8Array} key
- * @param {Uint8Array} description
- * @returns {CheckCtResult}
- */
-export function check_received_ct_key_extended_image_crop_v2(ct, key, description) {
-    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.check_received_ct_key_extended_image_crop_v2(ptr0, len0, ct, ptr1, len1, ptr2, len2);
-    return CheckCtResult.__wrap(ret);
-}
-
-/**
- * Verifies an extended-audio-lowres V2 precontract commitment.
- * description must be 76 bytes: d_sha(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE).
- * @param {Uint8Array} description
- * @param {string} commitment
- * @param {string} opening_value
- * @param {Uint8Array} ct
- * @returns {CheckPrecontractResult}
- */
-export function check_precontract_extended_audio_lowres_v2(description, commitment, opening_value, ct) {
-    const ptr0 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(commitment, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passStringToWasm0(opening_value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.check_precontract_extended_audio_lowres_v2(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-    return CheckPrecontractResult.__wrap(ret);
-}
-
-/**
- * Compiles a V2 circuit from ciphertext and description.
- *
- * # Arguments
- * * `ct` - Ciphertext bytes (must include 16-byte IV)
- * * `description` - Description hash as hex string
- *
- * # Returns
- * Serialized CompiledCircuitV2 bytes
- * @param {Uint8Array} ct
- * @param {string} description
- * @returns {Uint8Array}
- */
-export function compile_circuit_v2_wasm(ct, description) {
-    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.compile_circuit_v2_wasm(ptr0, len0, ptr1, len1);
-    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v3;
-}
-
-/**
- * Computes precontract for a both-audio container (format 0x03).
- * description = d_sha(32) || d_preview(32) || d_lowres(32) || duration(4BE) || bitrate(4BE) || size(4BE) = 108 bytes.
- * @param {Uint8Array} file
- * @param {Uint8Array} key
- * @param {Uint8Array} d_sha
- * @param {Uint8Array} d_preview
- * @param {Uint8Array} d_lowres
- * @param {number} d_duration
- * @param {number} d_bitrate
- * @param {number} d_size
- * @returns {Precontract}
- */
-export function compute_precontract_extended_audio_both_v2(file, key, d_sha, d_preview, d_lowres, d_duration, d_bitrate, d_size) {
-    var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
-    var len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(d_sha, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(d_preview, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ptr4 = passArray8ToWasm0(d_lowres, wasm.__wbindgen_malloc);
-    const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_extended_audio_both_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, d_duration, d_bitrate, d_size);
-    return Precontract.__wrap(ret);
-}
-
-/**
  * Verifies an extended-audio V2 precontract commitment.
- * description must be 76 bytes: d_sha(32) || d_preview(32) || duration(4BE) || bitrate(4BE) || size(4BE).
+ * description must be 76 bytes: d_sha(32) || d_crop(32) || duration(4BE) || bitrate(4BE) || size(4BE).
  * @param {Uint8Array} description
  * @param {string} commitment
  * @param {string} opening_value
@@ -1097,18 +1363,31 @@ export function check_precontract_extended_audio_v2(description, commitment, ope
 }
 
 /**
- * Computes precontract for a crop-preview image container (format 0x02).
- * description = d_sha(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE) = 76 bytes.
+ * Computes precontract values for an audio file using the extended audio description circuit.
+ *
+ * The plaintext must be a canonical audio container:
+ *   bytes   0– 63  : header (format=0x01 | size 4B BE | duration_secs 4B BE | bitrate_kbps 4B BE | reserved 51B)
+ *   bytes  64–480063: 30s × 8kHz mono Int16-LE PCM preview (480 000 bytes)
+ *   bytes 480064+  : original audio file bytes
+ *
+ * # Arguments
+ * * `file`       - Plaintext container bytes
+ * * `key`        - AES-128 key (16 bytes)
+ * * `d_sha`      - SHA256(file) — 32 bytes
+ * * `d_crop`     - SHA256(x[64..480064]) — first 240 000 Int16 samples — 32 bytes
+ * * `d_duration` - Total duration in seconds
+ * * `d_bitrate`  - Encoding bitrate in kbps
+ * * `d_size`     - Container size in bytes
  * @param {Uint8Array} file
  * @param {Uint8Array} key
  * @param {Uint8Array} d_sha
  * @param {Uint8Array} d_crop
- * @param {number} d_width
- * @param {number} d_height
+ * @param {number} d_duration
+ * @param {number} d_bitrate
  * @param {number} d_size
  * @returns {Precontract}
  */
-export function compute_precontract_extended_image_crop_v2(file, key, d_sha, d_crop, d_width, d_height, d_size) {
+export function compute_precontract_extended_audio_v2(file, key, d_sha, d_crop, d_duration, d_bitrate, d_size) {
     var ptr0 = passArray8ToWasm0(file, wasm.__wbindgen_malloc);
     var len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
@@ -1117,85 +1396,85 @@ export function compute_precontract_extended_image_crop_v2(file, key, d_sha, d_c
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArray8ToWasm0(d_crop, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_precontract_extended_image_crop_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_width, d_height, d_size);
+    const ret = wasm.compute_precontract_extended_audio_v2(ptr0, len0, file, ptr1, len1, ptr2, len2, ptr3, len3, d_duration, d_bitrate, d_size);
     return Precontract.__wrap(ret);
 }
 
 /**
- * Computes proofs for step 8b (V2) - corresponds to Step 8b in paper (Section F.2).
+ * Evaluates a circuit with the given ciphertext, constants, and description.
  *
  * # Arguments
- * * `circuit_bytes` - Serialized V2 circuit bytes
- * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
- * * `ct` - Ciphertext bytes
- * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
+ * * `circuit_bytes` - Serialized circuit bytes. If empty, a new basic circuit will be compiled
+ * * `ct` - Ciphertext bytes to evaluate
+ * * `constants` - Vector of hex-encoded constant values
+ * * `description` - Description hash in hex format
  *
  * # Returns
- * A `FinalStepComponentsV2` containing:
- * - Gate information (64-byte encoded gate)
- * - Evaluated values at the challenge point
- * - Current accumulator value
- * - Multiple proofs (proof1, proof2, proof_ext)
- * Note that the returning object will have a proof3 component which is an empty array.
+ * An `EvaluatedCircuit` containing the evaluation results and circuit constants
  *
- * # Paper Correspondence
- * This implements Step 8b from the paper: "Case i = 1 following Step 8"
- * - challenge (code) = 1 corresponds to i = 1 in paper notation
- * - This case occurs when V said "left" for all challenges (disagreed on every hpre)
- * - There is no w_{i-1} defined in this case (hpre(0) = ∅ by convention in paper)
+ * # Details
+ * This function either uses an existing circuit (from circuit_bytes) or creates a new basic circuit
+ * based on the ciphertext length and description. It then evaluates the circuit with the given
+ * ciphertext and constants.
  * @param {Uint8Array} circuit_bytes
- * @param {Uint8Array} evaluated_circuit_bytes
  * @param {Uint8Array} ct
- * @param {number} challenge
- * @returns {FinalStepComponentsV2}
+ * @param {string[]} constants
+ * @param {string} description
+ * @returns {EvaluatedCircuit}
  */
-export function compute_proofs_left_v2(circuit_bytes, evaluated_circuit_bytes, ct, challenge) {
+export function evaluate_circuit(circuit_bytes, ct, constants, description) {
     const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+    const ptr1 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const ptr2 = passArrayJsValueToWasm0(constants, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_proofs_left_v2(ptr0, len0, ptr1, len1, ptr2, len2, challenge);
-    return FinalStepComponentsV2.__wrap(ret);
+    const ptr3 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.evaluate_circuit(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+    return EvaluatedCircuit.__wrap(ret);
 }
 
 /**
- * Computes proofs for step 8a (V2) - corresponds to Step 8a in paper (Section F.2).
+ * @param {Uint8Array} ct
+ * @param {Uint8Array} description
+ * @returns {Uint8Array}
+ */
+export function compile_circuit_extended_video_clip_v2_wasm(ct, description) {
+    const ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(description, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compile_circuit_extended_video_clip_v2_wasm(ptr0, len0, ptr1, len1);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * Verifies ciphertext decryption by checking against the description.
  *
  * # Arguments
- * * `circuit_bytes` - Serialized V2 circuit bytes
- * * `evaluated_circuit_bytes` - Serialized evaluated V2 circuit bytes
- * * `ct` - Ciphertext bytes
- * * `challenge` - Challenge point in the circuit (1-indexed gate index, matching paper notation)
+ * * `ct` - Ciphertext bytes to decrypt
+ * * `key` - Decryption key
+ * * `description` - Expected description hash in hex
  *
  * # Returns
- * A `FinalStepComponentsV2` containing:
- * - Gate information (64-byte encoded gate)
- * - Evaluated values at the challenge point
- * - Current accumulator value
- * - Multiple proofs (proof1, proof2, proof3, proof_ext)
- *
- * # Paper Correspondence
- * This implements Step 8a from the paper: "Case 1 < i ≤ n following Step 8"
- * - challenge (code) = i (paper), where 1 < i ≤ n in paper notation
- * - So challenge must satisfy: 1 < challenge ≤ numGates
- * - The gate g_i in paper corresponds to circuit.gates[challenge - 1] in code (converting 1-indexed to 0-indexed)
- * @param {Uint8Array} circuit_bytes
- * @param {Uint8Array} evaluated_circuit_bytes
+ * A `CheckCtResult` containing the verification status and decrypted data
  * @param {Uint8Array} ct
- * @param {number} challenge
- * @returns {FinalStepComponentsV2}
+ * @param {Uint8Array} key
+ * @param {string} description
+ * @returns {CheckCtResult}
  */
-export function compute_proofs_v2(circuit_bytes, evaluated_circuit_bytes, ct, challenge) {
-    const ptr0 = passArray8ToWasm0(circuit_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(evaluated_circuit_bytes, wasm.__wbindgen_malloc);
+export function check_received_ct_key(ct, key, description) {
+    var ptr0 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    var len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(ct, wasm.__wbindgen_malloc);
+    const ptr2 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_proofs_v2(ptr0, len0, ptr1, len1, ptr2, len2, challenge);
-    return FinalStepComponentsV2.__wrap(ret);
+    const ret = wasm.check_received_ct_key(ptr0, len0, ct, ptr1, len1, ptr2, len2);
+    return CheckCtResult.__wrap(ret);
 }
 
 /**

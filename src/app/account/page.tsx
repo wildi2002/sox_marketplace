@@ -2,7 +2,7 @@
 
 import Button from "../components/common/Button";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { getBalance } from "../lib/blockchain/common";
 import { useUser } from "../lib/UserContext";
 
@@ -45,11 +45,10 @@ function formatEth(value: number): string {
 }
 
 function formatWei(weiStr: string): string {
-    // Format with thousand separators (apostrophe in de-CH)
     return Number(weiStr).toLocaleString("de-CH") + " Wei";
 }
 
-export default function AccountPage() {
+function AccountPageContent() {
     const router = useRouter();
     const { user, setUsername } = useUser();
     const [rawBalance, setRawBalance] = useState<string | null>(null);
@@ -93,8 +92,6 @@ export default function AccountPage() {
         if (user?.username) setUsernameInput(user.username);
     }, [user?.username]);
 
-    // Saldo is pre-computed server-side (exact eth_getBalance at each block).
-    // No client-side back-calculation needed.
     const txWithSaldo = useMemo(
         () => transactions.map(tx => ({ ...tx, saldo: tx.saldo ?? null as number | null })),
         [transactions]
@@ -227,5 +224,13 @@ export default function AccountPage() {
                 )}
             </section>
         </main>
+    );
+}
+
+export default function AccountPage() {
+    return (
+        <Suspense>
+            <AccountPageContent />
+        </Suspense>
     );
 }

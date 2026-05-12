@@ -8,6 +8,14 @@ import init, {
     hex_to_bytes,
     compile_circuit_v2_wasm,
     compile_circuit_extended_image_v2_wasm,
+    compile_circuit_extended_image_crop_v2_wasm,
+    compile_circuit_extended_image_dual_v2_wasm,
+    compile_circuit_extended_audio_v2_wasm,
+    compile_circuit_extended_audio_lowres_v2_wasm,
+    compile_circuit_extended_audio_both_v2_wasm,
+    compile_circuit_extended_video_v2_wasm,
+    compile_circuit_extended_video_clip_v2_wasm,
+    compile_circuit_extended_video_both_v2_wasm,
     evaluate_circuit_v2_wasm,
     hpre_v2,
     compute_proofs_v2,
@@ -126,8 +134,7 @@ export default function DisputeSimulationModal({
         const { description, opening_value: openingValueHex, ct_hex: ctHex, algorithm_suite: algoSuite } = await infoRes.json();
         const ct = hex_to_bytes(ctHex);
         const descBytes = hex_to_bytes(description);
-        const isExtImg = (algorithmSuite ?? algoSuite) === "extended_image" && descBytes.length === 76;
-        addLog(`Data loaded — ct: ${ct.length} bytes, desc: ${descBytes.length}B, algo: ${algoSuite ?? algorithmSuite}${(algorithmSuite ?? algoSuite) === "extended_image" && !isExtImg ? " (legacy 32B desc, falling back to v2)" : ""}`, "ok");
+        addLog(`Data loaded — ct: ${ct.length} bytes, desc: ${descBytes.length}B, algo: ${algoSuite ?? algorithmSuite}`, "ok");
 
         // ── 3. Fetch AES key from blockchain ─────────────────────────────────
         addLog("Fetching AES key from smart contract...", "step");
@@ -137,10 +144,43 @@ export default function DisputeSimulationModal({
         addLog(`Key fetched: ${keyHex.slice(0, 16)}...`, "ok");
 
         // ── 4. Compile circuit ────────────────────────────────────────────────
-        addLog(`Compiling ${isExtImg ? "extended-image (76B desc)" : "V2"} circuit...`, "step");
-        const circuitBytes = isExtImg
-            ? compile_circuit_extended_image_v2_wasm(ct, descBytes)
-            : compile_circuit_v2_wasm(ct, description);
+        const suite = algorithmSuite ?? algoSuite ?? "";
+        const dLen  = descBytes.length;
+        let circuitLabel: string;
+        let circuitBytes: Uint8Array;
+        if (suite === "extended_image" && dLen === 76) {
+            circuitLabel = "extended_image (76B)";
+            circuitBytes = compile_circuit_extended_image_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_image_crop" && dLen === 84) {
+            circuitLabel = "extended_image_crop (84B)";
+            circuitBytes = compile_circuit_extended_image_crop_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_image_dual" && dLen === 116) {
+            circuitLabel = "extended_image_dual (116B)";
+            circuitBytes = compile_circuit_extended_image_dual_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_audio" && dLen === 76) {
+            circuitLabel = "extended_audio (76B)";
+            circuitBytes = compile_circuit_extended_audio_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_audio_lowres" && dLen === 76) {
+            circuitLabel = "extended_audio_lowres (76B)";
+            circuitBytes = compile_circuit_extended_audio_lowres_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_audio_both" && dLen === 112) {
+            circuitLabel = "extended_audio_both (112B)";
+            circuitBytes = compile_circuit_extended_audio_both_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_video" && dLen === 88) {
+            circuitLabel = "extended_video (88B)";
+            circuitBytes = compile_circuit_extended_video_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_video_clip" && dLen === 92) {
+            circuitLabel = "extended_video_clip (92B)";
+            circuitBytes = compile_circuit_extended_video_clip_v2_wasm(ct, descBytes);
+        } else if (suite === "extended_video_both" && dLen === 124) {
+            circuitLabel = "extended_video_both (124B)";
+            circuitBytes = compile_circuit_extended_video_both_v2_wasm(ct, descBytes);
+        } else {
+            // Legacy basic circuit or unknown suite — description is a hex string
+            circuitLabel = `basic V2 (suite=${suite}, descLen=${dLen})`;
+            circuitBytes = compile_circuit_v2_wasm(ct, description);
+        }
+        addLog(`Compiling ${circuitLabel} circuit...`, "step");
         addLog(`Circuit compiled — ${circuitBytes.length} bytes.`, "ok");
 
         // ── 5. Evaluate circuit once ──────────────────────────────────────────

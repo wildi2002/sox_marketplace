@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "../lib/UserContext";
 import SponsorContractsListView from "../components/sponsor/SponsorContractsListView";
 import DisputeListView from "../components/sponsor/DisputeListView";
 import Button from "../components/common/Button";
 
-export default function SponsorDashboard() {
+function SponsorDashboardContent() {
     const { user } = useUser();
     const router = useRouter();
 
@@ -33,5 +33,13 @@ export default function SponsorDashboard() {
                 <DisputeListView />
             </div>
         </main>
+    );
+}
+
+export default function SponsorDashboard() {
+    return (
+        <Suspense>
+            <SponsorDashboardContent />
+        </Suspense>
     );
 }

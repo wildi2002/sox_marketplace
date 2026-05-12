@@ -145,6 +145,17 @@ export async function GET(req: NextRequest) {
                 `).get(c.id) as { preview_image: string | null; preview_crop_image: string | null; ext_img_crop_hash: string | null; ext_img_crop_x: number | null; ext_img_crop_y: number | null } | undefined;
                 if (listing) return { ...c, preview_image: listing.preview_image, preview_crop_image: listing.preview_crop_image, ext_img_crop_hash: listing.ext_img_crop_hash, ext_img_crop_x: listing.ext_img_crop_x, ext_img_crop_y: listing.ext_img_crop_y };
             }
+            if ((c.algorithm_suite === "extended_video" || c.algorithm_suite === "extended_video_clip" || c.algorithm_suite === "extended_video_both") && !c.preview_video_thumb) {
+                const listing = db.prepare(`
+                    SELECT l.preview_video_thumb, l.ext_video_thumb_hash, l.ext_video_width, l.ext_video_height,
+                           l.ext_video_duration, l.ext_video_bitrate, l.ext_video_size, l.ext_video_fps,
+                           l.ext_video_clip_frames, l.preview_video_clip, l.ext_video_clip_hash
+                    FROM purchase_requests pr
+                    JOIN listings l ON l.id = pr.listing_id
+                    WHERE pr.contract_id = ? LIMIT 1
+                `).get(c.id) as any | undefined;
+                if (listing) return { ...c, ...listing };
+            }
             return c;
         });
 
@@ -317,6 +328,17 @@ export async function PUT(req: Request) {
                 ext_audio_lowres_hash: data.ext_audio_lowres_hash || null,
                 ext_audio_preview_sr: data.ext_audio_preview_sr ?? null,
                 ext_audio_lowres_sr: data.ext_audio_lowres_sr ?? null,
+                preview_video_thumb: data.preview_video_thumb || null,
+                ext_video_thumb_hash: data.ext_video_thumb_hash || null,
+                ext_video_width: data.ext_video_width ?? null,
+                ext_video_height: data.ext_video_height ?? null,
+                ext_video_duration: data.ext_video_duration ?? null,
+                ext_video_bitrate: data.ext_video_bitrate ?? null,
+                ext_video_size: data.ext_video_size ?? null,
+                ext_video_fps: data.ext_video_fps ?? null,
+                ext_video_clip_frames: data.ext_video_clip_frames ?? null,
+                preview_video_clip: data.preview_video_clip || null,
+                ext_video_clip_hash: data.ext_video_clip_hash || null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -341,7 +363,10 @@ export async function PUT(req: Request) {
                 preview_audio, ext_audio_preview_hash, ext_audio_duration, ext_audio_bitrate, ext_audio_size,
                 preview_crop_image, ext_img_crop_hash, ext_img_crop_x, ext_img_crop_y,
                 preview_audio_lowres, ext_audio_lowres_hash,
-                ext_audio_preview_sr, ext_audio_lowres_sr
+                ext_audio_preview_sr, ext_audio_lowres_sr,
+                preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
+                ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
+                ext_video_clip_frames, preview_video_clip, ext_video_clip_hash
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
@@ -355,7 +380,9 @@ export async function PUT(req: Request) {
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?,
-                ?, ?
+                ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -401,6 +428,17 @@ export async function PUT(req: Request) {
                 contractData.ext_audio_lowres_hash,
                 contractData.ext_audio_preview_sr,
                 contractData.ext_audio_lowres_sr,
+                contractData.preview_video_thumb,
+                contractData.ext_video_thumb_hash,
+                contractData.ext_video_width,
+                contractData.ext_video_height,
+                contractData.ext_video_duration,
+                contractData.ext_video_bitrate,
+                contractData.ext_video_size,
+                contractData.ext_video_fps,
+                contractData.ext_video_clip_frames,
+                contractData.preview_video_clip,
+                contractData.ext_video_clip_hash,
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);
@@ -433,18 +471,15 @@ export async function PUT(req: Request) {
             }
         } else if (contractData.file) {
             try {
-                if (!hex_to_bytes || !initSync) {
-                    throw new Error("crypto_lib module not available. Unable to process file.");
-                }
-                const module = readFileSync(`${WASM_PATH}crypto_lib_bg.wasm`);
-                initSync({ module: module });
-
                 fs.mkdirSync(UPLOADS_PATH, { recursive: true });
                 const fileName = `file_${id}.enc`;
-                fs.writeFileSync(path.join(UPLOADS_PATH, fileName), hex_to_bytes(contractData.file));
-            } catch (wasmError: any) {
-                console.error("❌ Error initializing WASM or saving file:", wasmError);
-                throw new Error(`Error processing file: ${wasmError.message || wasmError}`);
+                // Decode hex ciphertext with Node.js Buffer — strip 0x prefix first because
+                // Buffer.from("0x...", "hex") stops at the invalid 'x' and produces 0 bytes.
+                const fileHex = contractData.file.replace(/^0x/i, "");
+                fs.writeFileSync(path.join(UPLOADS_PATH, fileName), Buffer.from(fileHex, "hex"));
+            } catch (fileError: any) {
+                console.error("❌ Error saving ciphertext file:", fileError);
+                throw new Error(`Error saving file: ${fileError.message || fileError}`);
             }
         }
         

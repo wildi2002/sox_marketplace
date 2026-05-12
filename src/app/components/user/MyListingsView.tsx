@@ -44,6 +44,17 @@ type Listing = {
     ext_audio_lowres_hash?: string | null;
     ext_audio_preview_sr?: number | null;
     ext_audio_lowres_sr?: number | null;
+    preview_video_thumb?: string | null;
+    ext_video_thumb_hash?: string | null;
+    preview_video_clip?: string | null;
+    ext_video_clip_hash?: string | null;
+    ext_video_width?: number | null;
+    ext_video_height?: number | null;
+    ext_video_duration?: number | null;
+    ext_video_bitrate?: number | null;
+    ext_video_size?: number | null;
+    ext_video_fps?: number | null;
+    ext_video_clip_frames?: number | null;
 };
 
 type PurchaseRequest = {
@@ -301,6 +312,17 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                     listingExtAudioLowresHash={fulfillTarget.listing.ext_audio_lowres_hash}
                     listingExtAudioPreviewSr={fulfillTarget.listing.ext_audio_preview_sr}
                     listingExtAudioLowresSr={fulfillTarget.listing.ext_audio_lowres_sr}
+                    listingPreviewVideoThumb={fulfillTarget.listing.preview_video_thumb}
+                    listingExtVideoThumbHash={fulfillTarget.listing.ext_video_thumb_hash}
+                    listingPreviewVideoClip={fulfillTarget.listing.preview_video_clip}
+                    listingExtVideoClipHash={fulfillTarget.listing.ext_video_clip_hash}
+                    listingExtVideoWidth={fulfillTarget.listing.ext_video_width}
+                    listingExtVideoHeight={fulfillTarget.listing.ext_video_height}
+                    listingExtVideoDuration={fulfillTarget.listing.ext_video_duration}
+                    listingExtVideoBitrate={fulfillTarget.listing.ext_video_bitrate}
+                    listingExtVideoSize={fulfillTarget.listing.ext_video_size}
+                    listingExtVideoFps={fulfillTarget.listing.ext_video_fps}
+                    listingExtVideoClipFrames={fulfillTarget.listing.ext_video_clip_frames}
                     onClose={() => {
                         setFulfillTarget(null);
                         if (expandedId !== null) fetchRequests(expandedId);
