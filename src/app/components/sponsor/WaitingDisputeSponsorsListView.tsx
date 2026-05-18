@@ -3,7 +3,6 @@
 import Button from "../common/Button";
 import { useEffect, useState } from "react";
 import { sendSbFee, sendSvFee } from "@/app/lib/blockchain/optimistic";
-import ChfNote from "../common/ChfNote";
 import { useUser } from "@/app/lib/UserContext";
 import { useToast } from "@/app/lib/ToastContext";
 
@@ -132,7 +131,7 @@ export default function WaitingDisputeSponsorsListView() {
                                             : "Waiting for vendor sponsor"}
                                     </span>
                                 </td>
-                                <td className="p-2 w-1/6">{c.tip_dispute} ETH<ChfNote value={c.tip_dispute} /></td>
+                                <td className="p-2 w-1/6">{c.tip_dispute} ETH</td>
                                 <td className="p-2 w-1/6 text-xs">
                                     {c.stateName === "WaitSB"
                                         ? c.pk_buyer_sponsor

@@ -20,7 +20,6 @@ import init, {
     compute_precontract_extended_video_both_v2,
     bytes_to_hex,
 } from "@/app/lib/crypto_lib";
-import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
 import { useToast } from "@/app/lib/ToastContext";
 import { CANONICAL_FPS, canonicalVideoDims } from "@/app/lib/videoCanonical";
 import { hexToBytes } from "@/app/lib/helpers";
@@ -250,7 +249,9 @@ const AUDIO_CROP_SAMPLES   = 240_000; // fixed crop window (480 kB of PCM)
 const AUDIO_LOWRES_SAMPLES = 240_000; // fixed lowres output size (480 kB of PCM)
 
 /** Decode any audio file to mono Int16 PCM at original sample rate (≤96 kHz).
- *  PCM is zero-padded to at least AUDIO_CROP_SAMPLES so d_crop is always defined.
+ *  PCM is zero-padded so the circuit's GetByte gates never read beyond the buffer:
+ *    - at least AUDIO_CROP_SAMPLES for the crop hash
+ *    - at least (AUDIO_LOWRES_SAMPLES-1)*stride_k+1 for the lowres hash
  *  Returns pcmBytes, sampleRate, and totalSamples for writing the header. */
 async function decodeToFullPcm(file: File): Promise<{
     pcmBytes: Uint8Array;
@@ -263,13 +264,16 @@ async function decodeToFullPcm(file: File): Promise<{
     await tempCtx.close();
     const sampleRate    = Math.min(audioBuffer.sampleRate, 96_000);
     const actualSamples = Math.round(audioBuffer.duration * sampleRate);
-    const nSamples      = Math.max(AUDIO_CROP_SAMPLES, actualSamples);
+    // stride_k mirrors the WASM circuit: div_ceil(actualSamples, N).max(1)
+    const stride_k = Math.max(1, Math.ceil(actualSamples / AUDIO_LOWRES_SAMPLES));
+    // pad so the last decimated GetByte is within bounds and crop region is covered
+    const nSamples = Math.max(AUDIO_CROP_SAMPLES, (AUDIO_LOWRES_SAMPLES - 1) * stride_k + 1, actualSamples);
     const offCtx = new OfflineAudioContext(1, actualSamples, sampleRate);
     const src = offCtx.createBufferSource();
     src.buffer = audioBuffer; src.connect(offCtx.destination); src.start(0);
     const rendered = await offCtx.startRendering();
     const ch = rendered.getChannelData(0);
-    const pcm = new Int16Array(nSamples); // zero-initialised — pads short audio
+    const pcm = new Int16Array(nSamples); // zero-initialised — pads short/mid-length audio
     for (let i = 0; i < actualSamples; i++)
         pcm[i] = Math.max(-32768, Math.min(32767, Math.round(ch[i] * 32767)));
     return { pcmBytes: new Uint8Array(pcm.buffer), sampleRate, totalSamples: actualSamples };
@@ -277,16 +281,15 @@ async function decodeToFullPcm(file: File): Promise<{
 
 /** Extract AUDIO_LOWRES_SAMPLES decimated Int16 samples from x = header||PCM.
  *  stride K = ⌈total_samples / AUDIO_LOWRES_SAMPLES⌉ is read from header bytes 17-20.
- *  Mirrors the circuit's GetByte gates at offset 64 + i·K·2. */
+ *  Mirrors the circuit's GetByte gates at offset 64 + i·K·2.
+ *  No index clamping: the container is always padded to fit the last gate position. */
 function decimatePcmFromContainer(fileBytes: Uint8Array): Int16Array {
     const hdr          = new DataView(fileBytes.buffer, fileBytes.byteOffset);
     const totalSamples = hdr.getUint32(17, false); // big-endian
-    const strideK      = Math.ceil(totalSamples / AUDIO_LOWRES_SAMPLES);
-    const pcmSamples   = (fileBytes.length - 64) / 2;
+    const strideK      = Math.max(1, Math.ceil(totalSamples / AUDIO_LOWRES_SAMPLES));
     const decimated    = new Int16Array(AUDIO_LOWRES_SAMPLES);
     for (let i = 0; i < AUDIO_LOWRES_SAMPLES; i++) {
-        const srcIdx = Math.min(i * strideK, pcmSamples - 1);
-        decimated[i] = hdr.getInt16(64 + srcIdx * 2, true); // Int16 little-endian
+        decimated[i] = hdr.getInt16(64 + i * strideK * 2, true); // Int16 little-endian
     }
     return decimated;
 }
@@ -318,13 +321,6 @@ interface NewContractModalProps {
     listingPreviewHash?: string | null;
     listingBrisqueValue?: number | null;
     listingAlgorithmSuite?: string | null;
-    // ZK proof pre-computed at listing time (for zk algorithm)
-    listingZkProof?: string | null;
-    listingZkProofFull?: string | null;
-    listingZkHPt?: string | null;
-    listingZkThumbnailHash?: string | null;
-    listingZkBrisque?: number | null;
-    listingZkVkHash?: string | null;
     // Extended image description fields (for extended_image algorithm)
     listingExtImgThumbHash?: string | null;
     listingExtImgWidth?: number | null;
@@ -381,7 +377,6 @@ const ALGORITHM_LABELS: Record<string, string> = {
     extended_video: "Thumbnail (256×256, frame 0)",
     extended_video_clip: "Clip (first N frames)",
     extended_video_both: "Thumbnail + Clip (both)",
-    zk: "ZK Proof (SP1, ~1h)",
 };
 
 export default function NewContractModal({
@@ -399,12 +394,6 @@ export default function NewContractModal({
     listingPreviewHash,
     listingBrisqueValue,
     listingAlgorithmSuite,
-    listingZkProof,
-    listingZkProofFull,
-    listingZkHPt,
-    listingZkThumbnailHash,
-    listingZkBrisque,
-    listingZkVkHash,
     listingExtImgThumbHash,
     listingExtImgWidth,
     listingExtImgHeight,
@@ -463,7 +452,6 @@ export default function NewContractModal({
     const [isComputing, setIsComputing] = useState(false);
     const [computingProgress, setComputingProgress] = useState<string | null>(null);
     const isExtendedAlgo = algorithms === "extended_image" || algorithms === "extended_image_crop" || algorithms === "extended_image_dual" || algorithms === "extended_audio" || algorithms === "extended_audio_lowres" || algorithms === "extended_audio_both" || algorithms === "extended_video" || algorithms === "extended_video_clip" || algorithms === "extended_video_both";
-    const ethChfRate = useEthChfRate();
     const { showToast } = useToast();
 
     // Electron mode state
@@ -484,13 +472,6 @@ export default function NewContractModal({
         setImageHashStatus("idle");
         setAudioPreviewStatus("idle");
     }, [algorithms]);
-
-    // Auto-select ZK when in Electron and the listing already has a generated ZK proof
-    useEffect(() => {
-        if (isElectron && listingZkProof) {
-            setAlgorithms("zk");
-        }
-    }, [isElectron, listingZkProof]);
 
     useEffect(() => {
         const anyWindow: any = typeof window !== "undefined" ? window : {};
@@ -544,38 +525,17 @@ export default function NewContractModal({
 
             setPreOutElectron(preOut);
 
-            // For image listings: use pre-computed ZK proof from listing (zk algo)
-            // or compute fast hash commitment (default algo)
+            // For image listings: compute fast hash commitment
             let localZkData: any = null;
             if (listingType === "image") {
-                if (algorithms === "zk") {
-                    // ZK proof was already generated at listing time — use it directly
-                    if (listingZkProof) {
-                        localZkData = {
-                            proof: listingZkProof,
-                            proof_full: listingZkProofFull,
-                            h_pt: listingZkHPt,
-                            thumbnail_hash: listingZkThumbnailHash,
-                            brisque: listingZkBrisque,
-                            vk_hash: listingZkVkHash,
-                        };
-                        setZkProofData(localZkData);
-                        setZkProofStatus("done");
-                    } else {
-                        showToast("No ZK proof found in listing. Please re-create the listing with ZK algorithm.", "warning");
-                        setZkProofStatus("failed");
+                try {
+                    if (listingPreviewHash && listingBrisqueValue != null) {
+                        localZkData = await computeHashCommitment(listingPreviewHash, listingBrisqueValue);
                     }
-                } else {
-                    // Hash Commitment mode (default): fast, no SP1
-                    try {
-                        if (listingPreviewHash && listingBrisqueValue != null) {
-                            localZkData = await computeHashCommitment(listingPreviewHash, listingBrisqueValue);
-                        }
-                    } catch { /* leave null */ }
-                    if (localZkData) {
-                        setZkProofData(localZkData);
-                        setZkProofStatus("done");
-                    }
+                } catch { /* leave null */ }
+                if (localZkData) {
+                    setZkProofData(localZkData);
+                    setZkProofStatus("done");
                 }
             }
 
@@ -1199,9 +1159,6 @@ export default function NewContractModal({
                     >
                         Price (ETH)
                     </FormTextField>
-                    {ethToCHF(price, ethChfRate) && (
-                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(price, ethChfRate)} CHF</p>
-                    )}
                 </div>
 
                 <div>
@@ -1213,9 +1170,6 @@ export default function NewContractModal({
                     >
                         Tip for completion (ETH)
                     </FormTextField>
-                    {ethToCHF(tipCompletion, ethChfRate) && (
-                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(tipCompletion, ethChfRate)} CHF</p>
-                    )}
                 </div>
 
                 <div>
@@ -1227,9 +1181,6 @@ export default function NewContractModal({
                     >
                         Tip for dispute (ETH)
                     </FormTextField>
-                    {ethToCHF(tipDispute, ethChfRate) && (
-                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(tipDispute, ethChfRate)} CHF</p>
-                    )}
                 </div>
 
                 <FormTextField
@@ -1246,13 +1197,12 @@ export default function NewContractModal({
                     value={algorithms}
                     onChange={setAlgorithms}
                     options={
-                        listingType === "image" ? ["default", "extended_image", "extended_image_crop", "extended_image_dual", "zk"] :
+                        listingType === "image" ? ["default", "extended_image", "extended_image_crop", "extended_image_dual"] :
                         listingType === "audio" ? ["extended_audio", "extended_audio_lowres", "extended_audio_both"] :
                         listingType === "video" ? ["extended_video", "extended_video_clip", "extended_video_both"] :
                         ["default"]
                     }
                     optionLabels={ALGORITHM_LABELS}
-                    disabledOptions={!isElectron ? ["zk"] : []}
                     disabled={listingType === "general" || !!listingAlgorithmSuite}
                 >
                     Algorithm suite
@@ -1267,12 +1217,6 @@ export default function NewContractModal({
                 >
                     Circuit version
                 </FormSelect>
-
-                {!isElectron && listingType === "image" && listingAlgorithmSuite === "zk" && (
-                    <p className="col-span-2 text-xs text-yellow-800 bg-yellow-50 border border-yellow-200 rounded p-2">
-                        This listing was configured for ZK Proof (SP1), which requires the desktop app. Using Hash Commitment instead.
-                    </p>
-                )}
 
                 {(algorithms === "extended_audio" || algorithms === "extended_audio_both") && audioPreviewStatus === "checking" && (
                     <p className="col-span-2 text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded p-2">
@@ -1388,8 +1332,7 @@ export default function NewContractModal({
                                     ✓ Quality commitment ready — will be sent with precontract
                                 </p>
                                 <p className="text-gray-500">
-                                    Type: {zkProofData.proof_full ? "SP1 ZK Proof (Groth16)" : "Hash Commitment (SHA-256)"}
-                                    {typeof zkProofData.brisque === "number" ? ` · BRISQUE: ${zkProofData.brisque.toFixed(1)}` : ""}
+                                    Type: Hash Commitment (SHA-256)
                                 </p>
                                 <p className="text-gray-400">
                                     The buyer will automatically verify this when they open the precontract.
@@ -1398,9 +1341,7 @@ export default function NewContractModal({
                         )}
                         {zkProofStatus === "failed" && (
                             <p className="text-xs text-red-600">
-                                {algorithms === "zk"
-                                    ? "No ZK proof in listing. Re-create the listing with ZK algorithm."
-                                    : "Could not generate commitment. Submit anyway to proceed without proof."}
+                                Could not generate commitment. Submit anyway to proceed without proof.
                             </p>
                         )}
                     </div>

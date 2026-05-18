@@ -503,4 +503,34 @@ for (const col of [
     }
 }
 
+// desc V3 fields: d = SHA256(T‖Q‖D), dim, thumb (base64), quality (base64)
+for (const col of [
+    "desc_d TEXT",
+    "desc_dim TEXT",
+    "desc_thumb TEXT",
+    "desc_quality TEXT",
+]) {
+    try {
+        db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to listings:`, e.message);
+        }
+    }
+}
+for (const col of [
+    "desc_d TEXT",
+    "desc_dim TEXT",
+    "desc_thumb TEXT",
+    "desc_quality TEXT",
+]) {
+    try {
+        db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);
+    } catch (e: any) {
+        if (!e.message?.includes("duplicate column name")) {
+            console.warn(`Warning adding ${col} to contracts:`, e.message);
+        }
+    }
+}
+
 export default db;

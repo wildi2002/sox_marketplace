@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ChfNote from "../common/ChfNote";
 
 type PurchaseRequest = {
     id: number;
@@ -57,7 +56,7 @@ export default function MyRequestsView({ publicKey }: MyRequestsViewProps) {
                         {requests.map((req) => (
                             <tr key={req.id} className="even:bg-gray-200 border-b border-black">
                                 <td className="p-2 font-medium truncate">{req.title}</td>
-                                <td className="p-2">{req.price} ETH<ChfNote value={req.price} /></td>
+                                <td className="p-2">{req.price} ETH</td>
                                 <td className="p-2 font-mono text-xs">
                                     {req.pk_vendor.slice(0, 8)}…{req.pk_vendor.slice(-6)}
                                 </td>

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Button from "../common/Button";
 import NewContractModal from "./NewContractModal";
-import ChfNote from "../common/ChfNote";
 
 type Listing = {
     id: number;
@@ -21,12 +20,6 @@ type Listing = {
     preview_hash?: string | null;
     brisque_value?: number | null;
     created_at?: string | null;
-    zk_proof?: string | null;
-    zk_proof_full?: string | null;
-    zk_h_pt?: string | null;
-    zk_thumbnail_hash?: string | null;
-    zk_brisque?: number | null;
-    zk_vk_hash?: string | null;
     ext_img_thumb_hash?: string | null;
     ext_img_width?: number | null;
     ext_img_height?: number | null;
@@ -149,16 +142,8 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                         <div className="flex justify-between items-center gap-2">
                             <div className="flex-1 min-w-0">
                                 <span className="font-medium">{listing.title}</span>
-                                <span className="ml-3 text-sm text-gray-600">{listing.price} ETH<ChfNote value={listing.price} /></span>
-                                {listing.algorithm_suite === "zk" ? (
-                                    listing.zk_proof ? (
-                                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1) ✓</span>
-                                    ) : (
-                                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-medium">
-                                            ZK Proof: Generating…{listing.created_at ? ` (${Math.round((Date.now() - new Date(listing.created_at).getTime()) / 60000)} min)` : ""}
-                                        </span>
-                                    )
-                                ) : listing.listing_type === "image" && listing.algorithm_suite === "extended_image" ? (
+                                <span className="ml-3 text-sm text-gray-600">{listing.price} ETH</span>
+                                {listing.listing_type === "image" && listing.algorithm_suite === "extended_image" ? (
                                     <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Thumb (256×256)</span>
                                 ) : listing.listing_type === "image" && listing.algorithm_suite === "extended_image_crop" ? (
                                     <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Crop (native-res)</span>
@@ -289,12 +274,6 @@ export default function MyListingsView({ publicKey }: MyListingsViewProps) {
                     listingBrisqueValue={fulfillTarget.listing.brisque_value}
                     listingPreviewImage={fulfillTarget.listing.preview_image}
                     listingAlgorithmSuite={fulfillTarget.listing.algorithm_suite}
-                    listingZkProof={fulfillTarget.listing.zk_proof}
-                    listingZkProofFull={fulfillTarget.listing.zk_proof_full}
-                    listingZkHPt={fulfillTarget.listing.zk_h_pt}
-                    listingZkThumbnailHash={fulfillTarget.listing.zk_thumbnail_hash}
-                    listingZkBrisque={fulfillTarget.listing.zk_brisque}
-                    listingZkVkHash={fulfillTarget.listing.zk_vk_hash}
                     listingExtImgThumbHash={fulfillTarget.listing.ext_img_thumb_hash}
                     listingExtImgWidth={fulfillTarget.listing.ext_img_width}
                     listingExtImgHeight={fulfillTarget.listing.ext_img_height}

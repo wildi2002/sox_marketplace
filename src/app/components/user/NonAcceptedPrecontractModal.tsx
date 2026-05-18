@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Modal from "../common/Modal";
 import Button from "../common/Button";
 import { Contract } from "./NonAcceptedPrecontractsListView";
@@ -17,7 +17,6 @@ import init, {
     check_precontract_extended_video_both_v2,
 } from "@/app/lib/crypto_lib";
 import { hexToBytes, downloadFile } from "@/app/lib/helpers";
-import ChfNote from "../common/ChfNote";
 import { useToast } from "@/app/lib/ToastContext";
 
 interface NonAcceptedPrecontractModalProps {
@@ -34,10 +33,152 @@ function dataUrlToObjectUrl(dataUrl: string): string {
     return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
-type ZkStatus = "idle" | "verifying" | "valid" | "invalid" | "unavailable";
+// Exact OpenCV COLORMAP_JET LUT (256 entries, RGB) — matches ela-light.py
+const JET_LUT: readonly [number,number,number][] = [
+  [0,0,128],[0,0,132],[0,0,136],[0,0,140],[0,0,144],[0,0,148],[0,0,152],[0,0,156],
+  [0,0,160],[0,0,164],[0,0,168],[0,0,172],[0,0,176],[0,0,180],[0,0,184],[0,0,188],
+  [0,0,192],[0,0,196],[0,0,200],[0,0,204],[0,0,208],[0,0,212],[0,0,216],[0,0,220],
+  [0,0,224],[0,0,228],[0,0,232],[0,0,236],[0,0,240],[0,0,244],[0,0,248],[0,0,252],
+  [0,0,255],[0,4,255],[0,8,255],[0,12,255],[0,16,255],[0,20,255],[0,24,255],[0,28,255],
+  [0,32,255],[0,36,255],[0,40,255],[0,44,255],[0,48,255],[0,52,255],[0,56,255],[0,60,255],
+  [0,64,255],[0,68,255],[0,72,255],[0,76,255],[0,80,255],[0,84,255],[0,88,255],[0,92,255],
+  [0,96,255],[0,100,255],[0,104,255],[0,108,255],[0,112,255],[0,116,255],[0,120,255],[0,124,255],
+  [0,128,255],[0,132,255],[0,136,255],[0,140,255],[0,144,255],[0,148,255],[0,152,255],[0,156,255],
+  [0,160,255],[0,164,255],[0,168,255],[0,172,255],[0,176,255],[0,180,255],[0,184,255],[0,188,255],
+  [0,192,255],[0,196,255],[0,200,255],[0,204,255],[0,208,255],[0,212,255],[0,216,255],[0,220,255],
+  [0,224,255],[0,228,255],[0,232,255],[0,236,255],[0,240,255],[0,244,255],[0,248,255],[0,252,255],
+  [2,255,254],[6,255,250],[10,255,246],[14,255,242],[18,255,238],[22,255,234],[26,255,230],[30,255,226],
+  [34,255,222],[38,255,218],[42,255,214],[46,255,210],[50,255,206],[54,255,202],[58,255,198],[62,255,194],
+  [66,255,190],[70,255,186],[74,255,182],[78,255,178],[82,255,174],[86,255,170],[90,255,166],[94,255,162],
+  [98,255,158],[102,255,154],[106,255,150],[110,255,146],[114,255,142],[118,255,138],[122,255,134],[126,255,130],
+  [130,255,126],[134,255,122],[138,255,118],[142,255,114],[146,255,110],[150,255,106],[154,255,102],[158,255,98],
+  [162,255,94],[166,255,90],[170,255,86],[174,255,82],[178,255,78],[182,255,74],[186,255,70],[190,255,66],
+  [194,255,62],[198,255,58],[202,255,54],[206,255,50],[210,255,46],[214,255,42],[218,255,38],[222,255,34],
+  [226,255,30],[230,255,26],[234,255,22],[238,255,18],[242,255,14],[246,255,10],[250,255,6],[254,255,1],
+  [255,252,0],[255,248,0],[255,244,0],[255,240,0],[255,236,0],[255,232,0],[255,228,0],[255,224,0],
+  [255,220,0],[255,216,0],[255,212,0],[255,208,0],[255,204,0],[255,200,0],[255,196,0],[255,192,0],
+  [255,188,0],[255,184,0],[255,180,0],[255,176,0],[255,172,0],[255,168,0],[255,164,0],[255,160,0],
+  [255,156,0],[255,152,0],[255,148,0],[255,144,0],[255,140,0],[255,136,0],[255,132,0],[255,128,0],
+  [255,124,0],[255,120,0],[255,116,0],[255,112,0],[255,108,0],[255,104,0],[255,100,0],[255,96,0],
+  [255,92,0],[255,88,0],[255,84,0],[255,80,0],[255,76,0],[255,72,0],[255,68,0],[255,64,0],
+  [255,60,0],[255,56,0],[255,52,0],[255,48,0],[255,44,0],[255,40,0],[255,36,0],[255,32,0],
+  [255,28,0],[255,24,0],[255,20,0],[255,16,0],[255,12,0],[255,8,0],[255,4,0],[255,0,0],
+  [252,0,0],[248,0,0],[244,0,0],[240,0,0],[236,0,0],[232,0,0],[228,0,0],[224,0,0],
+  [220,0,0],[216,0,0],[212,0,0],[208,0,0],[204,0,0],[200,0,0],[196,0,0],[192,0,0],
+  [188,0,0],[184,0,0],[180,0,0],[176,0,0],[172,0,0],[168,0,0],[164,0,0],[160,0,0],
+  [156,0,0],[152,0,0],[148,0,0],[144,0,0],[140,0,0],[136,0,0],[132,0,0],[128,0,0],
+];
+
+function ModalElaVideoPlayer({ frames, audioBins, duration }: { frames: Uint8Array; audioBins: Uint32Array; duration?: number }) {
+    const K   = Math.floor(frames.length / 65536);
+    const dur = duration ?? K / 10;
+    const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [barUrl,   setBarUrl]   = useState<string | null>(null);
+
+    useEffect(() => {
+        if (K === 0) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { Muxer, ArrayBufferTarget } = await import("webm-muxer");
+                if (cancelled) return;
+                const frameDurUs = Math.round(dur * 1_000_000 / K);
+                const target = new ArrayBufferTarget();
+                const muxer = new Muxer({
+                    target,
+                    video: { codec: "V_VP8", width: 256, height: 256, frameRate: 1 },
+                    type: "webm",
+                });
+                const videoEncoder = new VideoEncoder({
+                    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+                    error: (e) => console.error("ELA encode:", e),
+                });
+                videoEncoder.configure({ codec: "vp8", width: 256, height: 256, bitrate: 200_000, framerate: 1 });
+                for (let ki = 0; ki < K; ki++) {
+                    if (cancelled) { videoEncoder.close(); return; }
+                    const f  = frames.subarray(ki * 65536, (ki + 1) * 65536);
+                    const id = new ImageData(256, 256);
+                    for (let i = 0; i < 65536; i++) {
+                        const [r, g, b] = JET_LUT[f[i]];
+                        id.data[i*4]=r; id.data[i*4+1]=g; id.data[i*4+2]=b; id.data[i*4+3]=255;
+                    }
+                    const bitmap = await createImageBitmap(id);
+                    const frame = new VideoFrame(bitmap, { timestamp: ki * frameDurUs, duration: frameDurUs, alpha: "discard" });
+                    videoEncoder.encode(frame, { keyFrame: true });
+                    frame.close();
+                    bitmap.close();
+                }
+                await videoEncoder.flush();
+                videoEncoder.close();
+                muxer.finalize();
+                if (cancelled) return;
+                const blob = new Blob([target.buffer], { type: "video/webm" });
+                setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
+            } catch (e) {
+                console.error("ELA video encoding failed:", e);
+            }
+        })();
+        return () => {
+            cancelled = true;
+            setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+        };
+    }, [frames, K, dur]);
+
+    useEffect(() => {
+        (async () => {
+            const oc  = new OffscreenCanvas(256, 64);
+            const ctx = oc.getContext("2d") as OffscreenCanvasRenderingContext2D;
+            const id  = ctx.createImageData(256, 64);
+            for (let p = 0; p < 256 * 64; p++) {
+                id.data[p*4]=200; id.data[p*4+1]=200; id.data[p*4+2]=200; id.data[p*4+3]=255;
+            }
+            const mx = audioBins.reduce((a, b) => Math.max(a, b), 0);
+            if (mx > 0) {
+                for (let x = 0; x < 256; x++) {
+                    const h = Math.round(audioBins[x] / mx * 64);
+                    for (let y = 64 - h; y < 64; y++) {
+                        const p = y * 256 + x;
+                        id.data[p*4]=34; id.data[p*4+1]=197; id.data[p*4+2]=94; id.data[p*4+3]=255;
+                    }
+                }
+            }
+            ctx.putImageData(id, 0, 0);
+            const blob = await oc.convertToBlob({ type: "image/png" });
+            const url  = await new Promise<string>(res => {
+                const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(blob);
+            });
+            setBarUrl(url);
+        })();
+    }, [audioBins]);
+
+    return (
+        <div className="flex gap-2 items-start">
+            <div className="flex-1 min-w-0">
+                <p className="text-xs text-gray-400 mb-0.5">ELA frames</p>
+                {videoUrl
+                    ? <video controls src={videoUrl} preload="auto"
+                            className="w-full rounded-lg border border-gray-100 bg-black"
+                            style={{ imageRendering: "pixelated" }} />
+                    : <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center text-xs text-gray-400">
+                            Encoding…
+                      </div>
+                }
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-xs text-gray-400 mb-0.5">Audio profile</p>
+                {barUrl
+                    ? <img src={barUrl} alt="Audio second-difference quality"
+                            className="w-full rounded border border-gray-100"
+                            style={{ imageRendering: "pixelated" }} />
+                    : <div className="w-full bg-gray-100 rounded" style={{ aspectRatio: "256/64" }} />
+                }
+            </div>
+        </div>
+    );
+}
 
 type VerifyResult =
-    | { success: true; h_circuit: string; h_ct: string; zkValid?: boolean; zkReason?: string }
+    | { success: true; h_circuit: string; h_ct: string }
     | { success: false; error: string };
 
 export default function NonAcceptedPrecontractModal({
@@ -46,11 +187,15 @@ export default function NonAcceptedPrecontractModal({
 }: NonAcceptedPrecontractModalProps) {
     const [isVerifying, setIsVerifying] = useState(false);
     const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
-    const [zkStatus, setZkStatus] = useState<ZkStatus>("idle");
-    const [zkReason, setZkReason] = useState<string | undefined>();
-    const [zkChecks, setZkChecks] = useState<{thumbnailMatch?: boolean; brisqueMatch?: boolean; cryptoValid?: boolean; hPtMatch?: boolean} | null>(null);
+    const [ctSize, setCtSize] = useState<number | null>(null);
     const [previewThumbStatus, setPreviewThumbStatus] = useState<"idle" | "checking" | "ok" | "warn">("idle");
     const [audioPreviewStatus, setAudioPreviewStatus] = useState<"idle" | "checking" | "ok" | "warn">("idle");
+    const [descVerifyStatus, setDescVerifyStatus] = useState<"idle" | "checking" | "ok" | "fail">("idle");
+    const [descComputedHash, setDescComputedHash] = useState<string | null>(null);
+    const [descAcceptedHash, setDescAcceptedHash] = useState<string | null>(null);
+    const [descThumbDataUrl, setDescThumbDataUrl] = useState<string | null>(null);
+    const [descQualityDataUrl, setDescQualityDataUrl] = useState<string | null>(null);
+    const [descQualityVideoData, setDescQualityVideoData] = useState<{ frames: Uint8Array; audioBins: Uint32Array } | null>(null);
     const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
     const [videoThumbBlobSrc, setVideoThumbBlobSrc] = useState<string | null>(null);
     const [videoClipBlobSrc, setVideoClipBlobSrc]   = useState<string | null>(null);
@@ -74,13 +219,6 @@ export default function NonAcceptedPrecontractModal({
         listing_type,
         preview_image,
         preview_hash,
-        brisque_value,
-        zk_proof,
-        zk_proof_full,
-        zk_h_ct,
-        zk_c_k,
-        zk_thumbnail_hash,
-        zk_brisque,
         ext_img_thumb_hash,
         ext_img_width,
         ext_img_height,
@@ -106,9 +244,39 @@ export default function NonAcceptedPrecontractModal({
         ext_video_height,
         ext_video_duration,
         ext_video_bitrate,
+        ext_video_size,
         ext_video_fps,
         ext_video_clip_frames,
+        desc_d,
+        desc_dim,
+        desc_thumb,
+        desc_quality,
     } = contract;
+
+    const formatBytes = (bytes: number): string => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    };
+
+    // Original file size from listing metadata; for video parse from description hex
+    let origSize: number | null = null;
+    if (listing_type === "image") {
+        origSize = ext_img_size ?? null;
+    } else if (listing_type === "audio") {
+        origSize = ext_audio_size ?? null;
+    } else if (listing_type === "video") {
+        origSize = ext_video_size ?? null;
+        if (origSize == null) {
+            // Fallback: parse dSize from description hex (first scalar field after hash fields)
+            const descHex = (item_description || "").replace(/^0x/, "");
+            const isBoth = algorithm_suite === "extended_video_both";
+            const scalarBase = isBoth ? 320 : 192;
+            if (descHex.length >= scalarBase + 8) {
+                origSize = parseInt(descHex.slice(scalarBase, scalarBase + 8), 16);
+            }
+        }
+    }
 
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useEffect(() => {
@@ -124,125 +292,6 @@ export default function NonAcceptedPrecontractModal({
         setVideoClipBlobSrc(u);
         return () => URL.revokeObjectURL(u);
     }, [preview_video_clip]);
-
-    // Auto-verify ZK proof when modal opens for image listings
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useEffect(() => {
-        if (listing_type !== "image" || !zk_proof || !zk_c_k) {
-            setZkStatus("unavailable");
-            return;
-        }
-
-        setZkStatus("verifying");
-        setZkChecks(null);
-
-        // Check 1: thumbnail hash from proof matches listing preview_hash
-        const thumbnailMatch =
-            !zk_thumbnail_hash || !preview_hash ||
-            zk_thumbnail_hash.replace("0x", "").toLowerCase() === preview_hash.replace("0x", "").toLowerCase();
-
-        // Check 2: BRISQUE from proof matches listing claim (within tolerance ±2)
-        const brisqueMatch =
-            zk_brisque == null || brisque_value == null ||
-            Math.abs(zk_brisque - brisque_value) <= 2.0;
-
-        // Check 3: h_pt from proof matches item_description (d = SHA256(pt) committed in precontract)
-        // This is the critical on-chain binding: SNARK proves h_pt = SHA256(pt) for the sold image
-        const hPtMatch =
-            !zk_h_ct || !item_description ||
-            zk_h_ct.replace("0x", "").toLowerCase() === item_description.replace("0x", "").toLowerCase();
-
-        setZkChecks({ thumbnailMatch, brisqueMatch, hPtMatch });
-
-        if (!hPtMatch) {
-            setZkStatus("invalid");
-            setZkReason("h_pt from proof does not match precontract description (SHA256(pt) mismatch)");
-            return;
-        }
-        if (!thumbnailMatch) {
-            setZkStatus("invalid");
-            setZkReason("Thumbnail hash in proof does not match listing preview");
-            return;
-        }
-        if (!brisqueMatch) {
-            setZkStatus("invalid");
-            setZkReason(`BRISQUE in proof (${zk_brisque?.toFixed(1)}) differs from listing claim (${brisque_value?.toFixed(1)})`);
-            return;
-        }
-
-        // Check 3: Cryptographic proof verification — entirely local, nothing sent to server.
-        // Hash commitment (no proof_full): verified in the browser with Web Crypto API.
-        // SP1 Groth16 proof (proof_full present): verified server-side via zk-host (runs locally).
-        if (!zk_proof_full) {
-            // Hash commitment: verify SHA256(c_k_bytes || brisque_float32_LE) == proof
-            (async () => {
-                try {
-                    const ckHex = (zk_c_k ?? "").replace("0x", "");
-                    const ckBytes = new Uint8Array(ckHex.length / 2);
-                    for (let i = 0; i < ckBytes.length; i++)
-                        ckBytes[i] = parseInt(ckHex.slice(i * 2, i * 2 + 2), 16);
-                    const brisqueNum = zk_brisque ?? brisque_value ?? 0;
-                    const brisqueBuf = new ArrayBuffer(4);
-                    new DataView(brisqueBuf).setFloat32(0, brisqueNum, true);
-                    const combined = new Uint8Array(ckBytes.length + 4);
-                    combined.set(ckBytes);
-                    combined.set(new Uint8Array(brisqueBuf), ckBytes.length);
-                    const hashBuf = await crypto.subtle.digest("SHA-256", combined);
-                    const expected = Array.from(new Uint8Array(hashBuf))
-                        .map((b) => b.toString(16).padStart(2, "0")).join("");
-                    const proofNorm = (zk_proof ?? "").replace("0x", "").toLowerCase();
-                    const valid = proofNorm === expected;
-                    setZkChecks(prev => ({ ...prev, cryptoValid: valid }));
-                    if (valid) {
-                        setZkStatus("valid");
-                    } else {
-                        setZkStatus("invalid");
-                        setZkReason("Hash commitment does not match");
-                    }
-                } catch {
-                    setZkChecks(prev => ({ ...prev, cryptoValid: false }));
-                    setZkStatus("unavailable");
-                }
-            })();
-        } else {
-            // SP1 Groth16: verify locally via Electron IPC (zk-host verify runs on this machine)
-            // Falls back to server-side only if not in Electron (server is also localhost in dev)
-            const payload = {
-                proof: zk_proof,
-                proof_full: zk_proof_full,
-                h_pt: null,
-                thumbnail_hash: zk_thumbnail_hash ?? null,
-                preview_hash: preview_hash ?? null,
-                brisque: zk_brisque ?? brisque_value ?? null,
-                c_k: zk_c_k,
-            };
-            const anyWindow: any = typeof window !== "undefined" ? window : {};
-            const verifyFn: Promise<{ valid: boolean; reason?: string }> =
-                anyWindow.electronAPI?.verifyZkProof
-                    ? anyWindow.electronAPI.verifyZkProof(payload)
-                    : fetch("/api/zk/verify", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(payload),
-                      }).then((r) => r.json());
-
-            verifyFn
-                .then((d) => {
-                    setZkChecks(prev => ({ ...prev, cryptoValid: d.valid }));
-                    if (d.valid) {
-                        setZkStatus("valid");
-                    } else {
-                        setZkStatus("invalid");
-                        setZkReason(d.reason);
-                    }
-                })
-                .catch(() => {
-                    setZkChecks(prev => ({ ...prev, cryptoValid: false }));
-                    setZkStatus("unavailable");
-                });
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [contract?.id]);
 
     // For extended_image/dual: verify that the preview image shown to the buyer matches
     // d_thumb (SHA256 of 256×256 BGR thumbnail from BMP) committed in the description tuple.
@@ -294,6 +343,7 @@ export default function NonAcceptedPrecontractModal({
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useEffect(() => {
         if (algorithm_suite !== "extended_audio" && algorithm_suite !== "extended_audio_both") return;
+        if (desc_d) { setAudioPreviewStatus("idle"); return; } // desc V3: no d_preview sub-hash
         if (!preview_audio) { setAudioPreviewStatus("idle"); return; }
 
         // Extract d_preview from item_description or fall back to ext_audio_preview_hash
@@ -321,6 +371,167 @@ export default function NonAcceptedPrecontractModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [contract?.id]);
 
+    // Render desc_thumb and desc_quality as data URLs for visual inspection.
+    // desc_thumb: base64 BGR bytes — 196608 B = single 256×256, 393216 B = dual (lowres‖crop)
+    // desc_quality: base64 — 65536 B = ELA-light (JET colormap), 1024 B = RMS bar chart
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useEffect(() => {
+        setDescThumbDataUrl(null);
+        setDescQualityDataUrl(null);
+        setDescQualityVideoData(null);
+        if (!desc_thumb && !desc_quality) return;
+        (async () => {
+            // desc_thumb is BGR 256×256 image bytes only for image listings
+            if (desc_thumb && listing_type === "image") {
+                try {
+                    const tBin = atob(desc_thumb);
+                    const isDual = tBin.length >= 393216;
+                    const canvasW = isDual ? 512 : 256;
+                    const canvas = new OffscreenCanvas(canvasW, 256);
+                    const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+                    const imgData = ctx.createImageData(canvasW, 256);
+                    const renderHalf = (offset: number, xOff: number) => {
+                        for (let i = 0; i < 65536; i++) {
+                            const base = offset + i * 3;
+                            const px = (Math.floor(i / 256) * canvasW + xOff + (i % 256)) * 4;
+                            imgData.data[px]     = base + 2 < tBin.length ? tBin.charCodeAt(base + 2) : 0;
+                            imgData.data[px + 1] = base + 1 < tBin.length ? tBin.charCodeAt(base + 1) : 0;
+                            imgData.data[px + 2] = base     < tBin.length ? tBin.charCodeAt(base)     : 0;
+                            imgData.data[px + 3] = 255;
+                        }
+                    };
+                    renderHalf(0, 0);
+                    if (isDual) renderHalf(196608, 256);
+                    ctx.putImageData(imgData, 0, 0);
+                    const blob = await canvas.convertToBlob({ type: "image/png" });
+                    const url = await new Promise<string>((res, rej) => {
+                        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej;
+                        r.readAsDataURL(blob);
+                    });
+                    setDescThumbDataUrl(url);
+                } catch { /* ignore */ }
+            }
+
+            if (!desc_quality) return;
+            try {
+                const qBin = atob(desc_quality);
+                if (qBin.length === 65536) {
+                    // ELA-light: apply JET colormap
+                    const canvas2 = new OffscreenCanvas(256, 256);
+                    const ctx2 = canvas2.getContext("2d") as OffscreenCanvasRenderingContext2D;
+                    const imgData2 = ctx2.createImageData(256, 256);
+                    for (let i = 0; i < 65536; i++) {
+                        const [r, g, b] = JET_LUT[qBin.charCodeAt(i)];
+                        imgData2.data[i * 4]     = r;
+                        imgData2.data[i * 4 + 1] = g;
+                        imgData2.data[i * 4 + 2] = b;
+                        imgData2.data[i * 4 + 3] = 255;
+                    }
+                    ctx2.putImageData(imgData2, 0, 0);
+                    const blob2 = await canvas2.convertToBlob({ type: "image/png" });
+                    const url2 = await new Promise<string>((res, rej) => {
+                        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej;
+                        r.readAsDataURL(blob2);
+                    });
+                    setDescQualityDataUrl(url2);
+                } else if (qBin.length === 1024) {
+                    // Second-difference profile: 256 uint32-BE values → bar chart
+                    const qBuf = new Uint8Array(1024);
+                    for (let i = 0; i < 1024; i++) qBuf[i] = qBin.charCodeAt(i);
+                    const view = new DataView(qBuf.buffer);
+                    const values: number[] = [];
+                    let maxVal = 0;
+                    for (let i = 0; i < 256; i++) {
+                        const v = view.getUint32(i * 4, false);
+                        values.push(v);
+                        if (v > maxVal) maxVal = v;
+                    }
+                    const W = 256, H = 64;
+                    const canvas3 = new OffscreenCanvas(W, H);
+                    const ctx3 = canvas3.getContext("2d") as OffscreenCanvasRenderingContext2D;
+                    const imgData3 = ctx3.createImageData(W, H);
+                    for (let x = 0; x < W; x++) {
+                        const norm = maxVal > 0 ? values[x] / maxVal : 0;
+                        const barH = Math.round(norm * H);
+                        for (let y = 0; y < H; y++) {
+                            const idx = (y * W + x) * 4;
+                            const lit = y >= H - barH;
+                            imgData3.data[idx]     = lit ? 99  : 240;
+                            imgData3.data[idx + 1] = lit ? 179 : 240;
+                            imgData3.data[idx + 2] = lit ? 132 : 240;
+                            imgData3.data[idx + 3] = 255;
+                        }
+                    }
+                    ctx3.putImageData(imgData3, 0, 0);
+                    const blob3 = await canvas3.convertToBlob({ type: "image/png" });
+                    const url3 = await new Promise<string>((res, rej) => {
+                        const r = new FileReader(); r.onload = () => res(r.result as string); r.onerror = rej;
+                        r.readAsDataURL(blob3);
+                    });
+                    setDescQualityDataUrl(url3);
+                } else if (qBin.length > 65536 + 1024 && (qBin.length - 1024) % 65536 === 0) {
+                    // Video ELA quality: K×65536 ELA frames ‖ 1024 B audio second-diff
+                    const K = (qBin.length - 1024) / 65536;
+                    const qBuf = new Uint8Array(qBin.length);
+                    for (let i = 0; i < qBin.length; i++) qBuf[i] = qBin.charCodeAt(i);
+                    const frames = qBuf.slice(0, K * 65536);
+                    const audioBuf = qBuf.slice(K * 65536);
+                    const audioView = new DataView(audioBuf.buffer);
+                    const audioBins = new Uint32Array(256);
+                    for (let i = 0; i < 256; i++) audioBins[i] = audioView.getUint32(i * 4, false);
+                    setDescQualityVideoData({ frames, audioBins });
+                }
+            } catch { /* ignore */ }
+        })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [contract?.id]);
+
+    // desc V3 buyer pre-payment check: verify SHA256(T ‖ Q ‖ D) = d
+    // Falls back to the first 32 bytes of item_description when desc_d is not a separate field.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useEffect(() => {
+        const descHex = (item_description || "").replace(/^0x/, "");
+        const effectiveD = desc_d?.replace(/^0x/, "").toLowerCase()
+            ?? (descHex.length >= 64 ? descHex.slice(0, 64).toLowerCase() : null);
+
+        if (!effectiveD || !desc_thumb || !desc_quality || !desc_dim) {
+            setDescVerifyStatus("idle");
+            setDescComputedHash(null);
+            setDescAcceptedHash(null);
+            return;
+        }
+        setDescVerifyStatus("checking");
+        setDescAcceptedHash(effectiveD);
+        (async () => {
+            try {
+                const tBin = atob(desc_thumb);
+                const t = new Uint8Array(tBin.length);
+                for (let i = 0; i < tBin.length; i++) t[i] = tBin.charCodeAt(i);
+
+                const qBin = atob(desc_quality);
+                const q = new Uint8Array(qBin.length);
+                for (let i = 0; i < qBin.length; i++) q[i] = qBin.charCodeAt(i);
+
+                const dHex = desc_dim.replace(/^0x/, "");
+                const d = new Uint8Array(dHex.length / 2);
+                for (let i = 0; i < d.length; i++) d[i] = parseInt(dHex.slice(i * 2, i * 2 + 2), 16);
+
+                const tqd = new Uint8Array(t.length + q.length + d.length);
+                tqd.set(t, 0);
+                tqd.set(q, t.length);
+                tqd.set(d, t.length + q.length);
+                const hashBuf = await crypto.subtle.digest("SHA-256", tqd);
+                const computed = Array.from(new Uint8Array(hashBuf))
+                    .map(b => b.toString(16).padStart(2, "0")).join("");
+                setDescComputedHash(computed);
+                setDescVerifyStatus(computed === effectiveD ? "ok" : "fail");
+            } catch {
+                setDescVerifyStatus("fail");
+            }
+        })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [contract?.id]);
+
     const handleVerifyCommitment = async () => {
         setIsVerifying(true);
         setVerifyResult(null);
@@ -334,6 +545,7 @@ export default function NonAcceptedPrecontractModal({
             }
             const { file: ctHex } = await fileRes.json();
             const ctBytes = hexToBytes(ctHex);
+            setCtSize(ctBytes.length);
 
             // 3. Verify commitment in the browser.
             // Extended algorithm suites use algorithm-specific circuits; dispatch to the correct
@@ -450,479 +662,367 @@ export default function NonAcceptedPrecontractModal({
             <div className="grid grid-cols-2 gap-4">
                 {listing_type === "audio" && (algorithm_suite === "extended_audio" || algorithm_suite === "extended_audio_lowres" || algorithm_suite === "extended_audio_both") && (() => {
                     const descHex = (item_description || "").replace(/^0x/, "");
-                    const isBoth = algorithm_suite === "extended_audio_both";
-                    const isLowres = algorithm_suite === "extended_audio_lowres";
-                    const isFullDesc = isBoth ? descHex.length >= 216 : descHex.length >= 152;
-                    const dShaHex     = isFullDesc ? descHex.slice(0, 64)    : descHex;
-                    const dPreviewHex = (isFullDesc && !isLowres) ? descHex.slice(64, 128) : null;
-                    const dLowresHex  = isFullDesc && (isLowres || isBoth) ? descHex.slice(isLowres ? 64 : 128, isLowres ? 128 : 192) : null;
-                    const scalarOffset = isFullDesc ? (isBoth ? 192 : 128) : 0;
-                    const dDuration = isFullDesc ? parseInt(descHex.slice(scalarOffset, scalarOffset + 8), 16) : ext_audio_duration;
-                    const dBitrate  = isFullDesc ? parseInt(descHex.slice(scalarOffset + 8, scalarOffset + 16), 16) : ext_audio_bitrate;
-                    const dSize     = isFullDesc ? parseInt(descHex.slice(scalarOffset + 16, scalarOffset + 24), 16) : null;
+                    // desc V3: d = SHA256(T‖Q‖D) — single 32-byte commitment
+                    const dShaHex = descHex.slice(0, 64);
+                    // Parse D from desc_dim (desc V3) if available: [duration_s, sample_rate, n_samples]
+                    const dimHex = (desc_dim || "").replace(/^0x/, "");
+                    const dimU32s: number[] = [];
+                    for (let i = 0; i + 7 < dimHex.length; i += 8)
+                        dimU32s.push(parseInt(dimHex.slice(i, i + 8), 16));
+                    const tBytes = desc_thumb ? Math.round(atob(desc_thumb).length) : 0;
+                    const qBytes = desc_quality ? Math.round(atob(desc_quality).length) : 0;
                     return (
                     <div className={`col-span-2 rounded border p-3 text-sm ${
                         audioPreviewStatus === "warn"
                             ? "bg-red-50 border-red-300"
-                            : audioPreviewStatus === "ok"
+                            : descVerifyStatus === "ok" || audioPreviewStatus === "ok"
                             ? "bg-green-50 border-green-300"
+                            : descVerifyStatus === "fail"
+                            ? "bg-red-50 border-red-300"
                             : "bg-purple-50 border-purple-200"
                     }`}>
-                        <div className="flex items-center justify-between mb-2">
-                            <p className="font-semibold text-gray-800">Audio Preview (Extended Description)</p>
+                        <div className="flex items-center justify-between mb-3">
+                            <p className="font-semibold text-gray-800">Audio Description</p>
                             <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-purple-100 text-purple-800">
-                                {isFullDesc ? (isBoth ? "108B ✓" : "76B ✓") : "legacy"}
+                                SHA256(T ‖ Q ‖ D)
                             </span>
                         </div>
-                        {preview_audio && (
-                            <div className="mb-2">
-                                <p className="text-xs text-gray-500 mb-1">
-                                    Preview{ext_audio_preview_sr != null && ext_audio_duration != null
-                                        ? ` — ${ext_audio_preview_sr.toLocaleString()} Hz · Int16 · ${Math.min(ext_audio_duration, Math.round(240_000 / ext_audio_preview_sr))}s of ${ext_audio_duration}s`
-                                        : ""} (verify before accepting):
-                                </p>
-                                <audio controls src={preview_audio} className="w-full h-8" />
-                            </div>
-                        )}
-                        {preview_audio_lowres && (
-                            <div className="mb-2">
-                                <p className="text-xs text-gray-500 mb-1">
-                                    Full low-res{ext_audio_lowres_sr != null && ext_audio_duration != null
-                                        ? ` — ${ext_audio_lowres_sr.toLocaleString()} Hz · Int8 · ${ext_audio_duration}s`
-                                        : " audio (low quality)"}:
-                                </p>
-                                <audio controls src={preview_audio_lowres} className="w-full h-8" />
-                            </div>
-                        )}
-                        <div className="font-mono text-xs text-gray-500 space-y-0.5 mb-2 bg-white/60 rounded p-2">
-                            <p><span className="text-gray-400">d_sha    </span> {dShaHex.slice(0, 32)}…</p>
-                            {dPreviewHex
-                                ? <p><span className="text-gray-400">d_preview</span> {dPreviewHex.slice(0, 32)}…</p>
-                                : !isLowres && <p className="text-yellow-700">d_preview: not committed</p>
-                            }
-                            {dLowresHex && (
-                                <p><span className="text-gray-400">d_lowres </span> {dLowresHex.slice(0, 32)}…</p>
-                            )}
-                            {dDuration != null && <p><span className="text-gray-400">duration </span> {dDuration} s</p>}
-                            {dBitrate  != null && <p><span className="text-gray-400">bitrate  </span> {dBitrate} kbps</p>}
-                            {dSize     != null && <p><span className="text-gray-400">size     </span> {dSize.toLocaleString()} B</p>}
-                            {dPreviewHex && ext_audio_preview_hash && (
-                                <p className={dPreviewHex === ext_audio_preview_hash.replace(/^0x/,"") ? "text-green-700" : "text-red-700"}>
-                                    d_preview vs listing: {dPreviewHex === ext_audio_preview_hash.replace(/^0x/,"") ? "✓ match" : "✗ MISMATCH"}
-                                </p>
-                            )}
-                            {dLowresHex && ext_audio_lowres_hash && (
-                                <p className={dLowresHex === ext_audio_lowres_hash.replace(/^0x/,"") ? "text-green-700" : "text-red-700"}>
-                                    d_lowres vs listing: {dLowresHex === ext_audio_lowres_hash.replace(/^0x/,"") ? "✓ match" : "✗ MISMATCH"}
-                                </p>
-                            )}
-                        </div>
-                        {(preview_audio || preview_audio_lowres) && (
-                        <div className="flex items-start gap-2 text-xs mt-1">
-                            <span className={`shrink-0 font-bold ${
-                                audioPreviewStatus === "checking" ? "text-blue-500" :
-                                audioPreviewStatus === "ok"       ? "text-green-700" :
-                                audioPreviewStatus === "warn"     ? "text-red-700" :
-                                "text-gray-400"
-                            }`}>
-                                {audioPreviewStatus === "checking" ? "…" :
-                                 audioPreviewStatus === "ok"       ? "✓" :
-                                 audioPreviewStatus === "warn"     ? "✗" : "·"}
-                            </span>
-                            <div>
-                                <span className="font-medium text-gray-700">SHA256(preview PCM) == d_preview</span>
-                                <span className="text-gray-500 ml-1">— verified locally in your browser</span>
-                                {audioPreviewStatus === "warn" && (
-                                    <p className="mt-1 font-semibold text-red-800">
-                                        ⚠ Preview does NOT match d_preview — the audio preview may have been tampered with!
+
+                        {/* T — Preview */}
+                        <div className="mb-3">
+                            <p className="text-xs font-semibold text-gray-600 mb-1.5">
+                                T — Preview
+                                {tBytes > 0 && <span className="font-normal text-gray-400 ml-1">({(tBytes / 1024).toFixed(0)} KB Int16 PCM)</span>}
+                            </p>
+                            {preview_audio && (
+                                <div className="mb-1.5">
+                                    <p className="text-xs text-gray-500 mb-1">
+                                        Preview{ext_audio_preview_sr != null && ext_audio_duration != null
+                                            ? ` — ${ext_audio_preview_sr.toLocaleString()} Hz · Int16 · first ${Math.min(ext_audio_duration, Math.round(240_000 / ext_audio_preview_sr))}s of ${ext_audio_duration}s`
+                                            : ""}:
                                     </p>
-                                )}
-                                {audioPreviewStatus === "ok" && (
-                                    <p className="mt-0.5 text-green-700">Preview matches committed d_preview exactly.</p>
-                                )}
-                            </div>
+                                    <audio controls src={preview_audio} className="w-full h-8" />
+                                </div>
+                            )}
+                            {preview_audio_lowres && (
+                                <div className="mb-1.5">
+                                    <p className="text-xs text-gray-500 mb-1">
+                                        Full low-res{ext_audio_lowres_sr != null && ext_audio_duration != null
+                                            ? ` — ${ext_audio_lowres_sr.toLocaleString()} Hz · Int8 · ${ext_audio_duration}s`
+                                            : ""}:
+                                    </p>
+                                    <audio controls src={preview_audio_lowres} className="w-full h-8" />
+                                </div>
+                            )}
                         </div>
+
+                        {/* Q — Second-difference profile */}
+                        <div className="mb-3">
+                            <p className="text-xs font-semibold text-gray-600 mb-1.5">
+                                Q — Second-difference profile
+                                {qBytes === 1024 && <span className="font-normal text-gray-400 ml-1">(1024 B · 256×uint32 BE)</span>}
+                            </p>
+                            {descQualityDataUrl
+                                ? <img src={descQualityDataUrl} alt="Q second-difference"
+                                        className="w-full rounded border border-gray-200"
+                                        style={{ imageRendering: "pixelated", height: 48 }} />
+                                : desc_quality && <div className="text-xs text-gray-400 italic">Rendering…</div>
+                            }
+                        </div>
+
+                        {/* D — Metadata */}
+                        <div className="mb-3 font-mono text-xs text-gray-500 space-y-0.5 bg-white/60 rounded p-2">
+                            <p className="font-sans text-xs font-semibold text-gray-600 mb-1">D — Metadata</p>
+                            {dimU32s.length >= 1
+                                ? <>
+                                    <p><span className="text-gray-400">{"duration".padEnd(8)}</span> {dimU32s[0]} s</p>
+                                    {dimU32s[1] != null && <p><span className="text-gray-400">{"sr".padEnd(8)}</span> {dimU32s[1].toLocaleString()} Hz</p>}
+                                    {dimU32s[2] != null && <p><span className="text-gray-400">{"n_samp".padEnd(8)}</span> {dimU32s[2].toLocaleString()}</p>}
+                                </>
+                                : <>
+                                    {ext_audio_duration != null && <p><span className="text-gray-400">{"duration".padEnd(8)}</span> {ext_audio_duration} s</p>}
+                                    {ext_audio_bitrate  != null && <p><span className="text-gray-400">{"bitrate".padEnd(8)}</span> {ext_audio_bitrate} kbps</p>}
+                                    {ext_audio_size     != null && <p><span className="text-gray-400">{"size".padEnd(8)}</span> {ext_audio_size.toLocaleString()} B</p>}
+                                </>
+                            }
+                            <p className="pt-1 border-t border-gray-200 mt-1">
+                                <span className="text-gray-400 font-sans">d</span>
+                                <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D))</span>
+                                {dShaHex.slice(0, 32)}…
+                            </p>
+                        </div>
+
+                        {/* SHA256(T‖Q‖D) verification */}
+                        {descAcceptedHash !== null && (
+                            <div className="flex items-start gap-2 text-xs">
+                                <span className={`shrink-0 font-bold ${
+                                    descVerifyStatus === "checking" ? "text-blue-500" :
+                                    descVerifyStatus === "ok"       ? "text-green-700" :
+                                    descVerifyStatus === "fail"     ? "text-red-700" : "text-gray-400"
+                                }`}>{descVerifyStatus === "checking" ? "…" : descVerifyStatus === "ok" ? "✓" : descVerifyStatus === "fail" ? "✗" : "·"}</span>
+                                <div>
+                                    <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D) == d</span>
+                                    <span className="text-gray-500 ml-1">— verified locally in your browser</span>
+                                    {descVerifyStatus === "fail" && (
+                                        <p className="mt-1 font-semibold text-red-800">⚠ Verification FAILED — T, Q, or D does not match d!</p>
+                                    )}
+                                    {descVerifyStatus === "ok" && (
+                                        <div className="mt-0.5 text-green-700">
+                                            <p>Authentic — SHA256(T ‖ Q ‖ D) matches the committed d.</p>
+                                            <div className="mt-1 font-mono text-[10px] space-y-0.5 text-gray-600">
+                                                <p><span className="text-gray-400 select-none">d (accepted) </span>{descAcceptedHash ?? "…"}</p>
+                                                <p><span className="text-gray-400 select-none">computed     </span>{descComputedHash ?? "…"}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         )}
                     </div>
                     );
                 })()}
 
-                {/* Extended video: show thumbnail/clip previews and committed hash verification */}
+                {/* Extended video: T/Q/D structured description */}
                 {listing_type === "video" && (algorithm_suite === "extended_video" || algorithm_suite === "extended_video_clip" || algorithm_suite === "extended_video_both") && (() => {
                     const descHex = (item_description || "").replace(/^0x/, "");
                     const isClip  = algorithm_suite === "extended_video_clip";
                     const isBoth  = algorithm_suite === "extended_video_both";
-                    // Actual description layouts (from WASM docstrings):
-                    //   extended_video      128B: d_sha(32)||d_thumb(32)||d_lowres(32)||scalars(8×4B)
-                    //   extended_video_clip 132B: d_sha(32)||d_clip(32) ||d_crop(32) ||scalars(9×4B)
-                    //   extended_video_both 196B: d_sha(32)||d_thumb(32)||d_clip(32)||d_lowres(32)||d_crop(32)||scalars(9×4B)
-                    const expectedHexLen = isBoth ? 392 : isClip ? 264 : 256;
-                    const isFullDesc = descHex.length >= expectedHexLen;
-                    const dShaHex   = descHex.length >= 64 ? descHex.slice(0, 64) : descHex;
-                    // d_thumb at hex[64..128] for extended_video and extended_video_both
-                    const dThumbHex = !isClip && descHex.length >= 128 ? descHex.slice(64, 128) : null;
-                    // d_clip at hex[64..128] for extended_video_clip, hex[128..192] for extended_video_both
-                    const dClipHex = isClip
-                        ? (descHex.length >= 128 ? descHex.slice(64, 128) : null)
-                        : isBoth
-                        ? (descHex.length >= 192 ? descHex.slice(128, 192) : null)
-                        : null;
-                    // scalars start after all hash fields:
-                    //   extended_video / extended_video_clip: 3 hashes × 64 hex = 192
-                    //   extended_video_both: 5 hashes × 64 hex = 320
-                    const scalarBase = isBoth ? 320 : 192;
-                    const dSize     = isFullDesc ? parseInt(descHex.slice(scalarBase,      scalarBase + 8),  16) : null;
-                    const dDuration = isFullDesc ? parseInt(descHex.slice(scalarBase + 8,  scalarBase + 16), 16) : ext_video_duration;
-                    const dBitrate  = isFullDesc ? parseInt(descHex.slice(scalarBase + 16, scalarBase + 24), 16) : ext_video_bitrate;
-                    const dWidth    = isFullDesc ? parseInt(descHex.slice(scalarBase + 24, scalarBase + 32), 16) : ext_video_width;
-                    const dHeight   = isFullDesc ? parseInt(descHex.slice(scalarBase + 32, scalarBase + 40), 16) : ext_video_height;
-                    const dFps      = isFullDesc ? parseInt(descHex.slice(scalarBase + 40, scalarBase + 48), 16) : ext_video_fps;
+                    // desc V3: d = SHA256(T‖Q‖D) — single 32-byte commitment, no sub-hashes
+                    const dShaHex = descHex.slice(0, 64);
+                    const qBytes  = desc_quality ? Math.round(atob(desc_quality).length) : 0;
                     return (
-                        <div className="col-span-2 rounded border bg-green-50 border-green-200 p-3 text-sm">
-                            <div className="flex items-center justify-between mb-2">
-                                <p className="font-semibold text-gray-800">Video Preview (Extended Description)</p>
+                        <div className={`col-span-2 rounded border p-3 text-sm ${
+                            descVerifyStatus === "fail"     ? "bg-red-50 border-red-300" :
+                            descVerifyStatus === "ok"       ? "bg-green-50 border-green-300" :
+                            descVerifyStatus === "checking" ? "bg-blue-50 border-blue-200" :
+                            "bg-green-50 border-green-200"
+                        }`}>
+                            <div className="flex items-center justify-between mb-3">
+                                <p className="font-semibold text-gray-800">Video Description</p>
                                 <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-green-100 text-green-800">
-                                    {isBoth ? "196B" : isClip ? "132B" : "128B"} {isFullDesc ? "✓" : "⚠ legacy"}
+                                    T ‖ Q ‖ D
                                 </span>
                             </div>
-                            <div className="flex gap-4 mb-2">
-                                {videoThumbBlobSrc && !isClip && (
-                                    <div className="flex-1">
-                                        <p className="text-xs text-gray-500 mb-1">Thumbnail (whole film, low-res):</p>
-                                        <video controls src={videoThumbBlobSrc} className="w-full max-h-52 rounded border border-gray-200 bg-black" preload="auto" />
-                                    </div>
-                                )}
-                                {videoClipBlobSrc && (isClip || isBoth) && (
-                                    <div className="flex-1">
-                                        <p className="text-xs text-gray-500 mb-1">Clip preview — first {ext_video_clip_frames} frames @ {dFps ?? ext_video_fps} fps:</p>
-                                        <video controls src={videoClipBlobSrc} className="w-full max-h-52 rounded border border-gray-200 bg-black" preload="auto" />
-                                    </div>
-                                )}
-                            </div>
-                            <div className="font-mono text-xs text-gray-500 space-y-0.5 bg-white/60 rounded p-2">
-                                <p><span className="text-gray-400">d_sha    </span> {dShaHex.slice(0, 32)}…</p>
-                                {dThumbHex && <p><span className="text-gray-400">d_thumb  </span> {dThumbHex.slice(0, 32)}…
-                                    {ext_video_thumb_hash && (
-                                        <span className={dThumbHex === ext_video_thumb_hash.replace(/^0x/, "") ? " text-green-700 ml-2" : " text-red-700 ml-2"}>
-                                            {dThumbHex === ext_video_thumb_hash.replace(/^0x/, "") ? "✓ match listing" : "✗ MISMATCH"}
-                                        </span>
+
+                            {/* T — Thumbnail / Clip */}
+                            <div className="mb-3">
+                                <p className="text-xs font-semibold text-gray-600 mb-1.5">T — Thumbnail / Clip</p>
+                                <div className="flex gap-3">
+                                    {videoThumbBlobSrc && !isClip && (
+                                        <div className="flex-1">
+                                            <p className="text-xs text-gray-500 mb-1">Thumbnail (whole film, low-res):</p>
+                                            <video controls src={videoThumbBlobSrc} className="w-full max-h-48 rounded border border-gray-200 bg-black" preload="auto" />
+                                        </div>
                                     )}
-                                </p>}
-                                {dClipHex && <p><span className="text-gray-400">d_clip   </span> {dClipHex.slice(0, 32)}…
-                                    {ext_video_clip_hash && (
-                                        <span className={dClipHex === ext_video_clip_hash.replace(/^0x/, "") ? " text-green-700 ml-2" : " text-red-700 ml-2"}>
-                                            {dClipHex === ext_video_clip_hash.replace(/^0x/, "") ? "✓ match listing" : "✗ MISMATCH"}
-                                        </span>
+                                    {videoClipBlobSrc && (isClip || isBoth) && (
+                                        <div className="flex-1">
+                                            <p className="text-xs text-gray-500 mb-1">Clip — first {ext_video_clip_frames} frames @ {ext_video_fps} fps:</p>
+                                            <video controls src={videoClipBlobSrc} className="w-full max-h-48 rounded border border-gray-200 bg-black" preload="auto" />
+                                        </div>
                                     )}
-                                </p>}
-                                {dSize     != null && <p><span className="text-gray-400">size     </span> {dSize.toLocaleString()} B</p>}
-                                {dDuration != null && <p><span className="text-gray-400">duration </span> {dDuration} s</p>}
-                                {dBitrate  != null && <p><span className="text-gray-400">bitrate  </span> {dBitrate} kbps</p>}
-                                {dWidth    != null && <p><span className="text-gray-400">W×H      </span> {dWidth}×{dHeight}</p>}
-                                {dFps      != null && <p><span className="text-gray-400">fps      </span> {dFps}</p>}
+                                    {!videoThumbBlobSrc && !videoClipBlobSrc && (
+                                        <p className="text-xs text-gray-400 italic">No preview available.</p>
+                                    )}
+                                </div>
                             </div>
+
+                            {/* Q — ELA video ‖ Audio second-difference */}
+                            <div className="mb-3">
+                                <p className="text-xs font-semibold text-gray-600 mb-1.5">
+                                    Q — ELA video ‖ Audio profile
+                                    {qBytes > 0 && <span className="font-normal text-gray-400 ml-1">({(qBytes / (1024*1024)).toFixed(1)} MB · {Math.round((qBytes - 1024) / 65536)} ELA frames + 1024 B audio)</span>}
+                                </p>
+                                {descQualityVideoData
+                                    ? <ModalElaVideoPlayer frames={descQualityVideoData.frames} audioBins={descQualityVideoData.audioBins} duration={ext_video_duration ?? undefined} />
+                                    : desc_quality
+                                    ? <div className="w-full aspect-video bg-gray-100 rounded flex items-center justify-center text-xs text-gray-400">Decoding ELA quality…</div>
+                                    : <p className="text-xs text-gray-400 italic">No quality data.</p>
+                                }
+                            </div>
+
+                            {/* D — Metadata */}
+                            <div className="font-mono text-xs text-gray-500 space-y-0.5 bg-white/60 rounded p-2 mb-2">
+                                <p className="font-sans text-xs font-semibold text-gray-600 mb-1">D — Metadata</p>
+                                {ext_video_size     != null && <p><span className="text-gray-400">{"size".padEnd(8)}</span> {ext_video_size.toLocaleString()} B</p>}
+                                {ext_video_duration != null && <p><span className="text-gray-400">{"duration".padEnd(8)}</span> {ext_video_duration} s</p>}
+                                {ext_video_bitrate  != null && <p><span className="text-gray-400">{"bitrate".padEnd(8)}</span> {ext_video_bitrate} kbps</p>}
+                                {ext_video_width    != null && <p><span className="text-gray-400">{"W×H".padEnd(8)}</span> {ext_video_width}×{ext_video_height}</p>}
+                                {ext_video_fps      != null && <p><span className="text-gray-400">{"fps".padEnd(8)}</span> {ext_video_fps}</p>}
+                                <p className="pt-1 border-t border-gray-200 mt-1">
+                                    <span className="text-gray-400 font-sans">d</span>
+                                    <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D))</span>
+                                    {dShaHex.slice(0, 32)}…
+                                </p>
+                            </div>
+
+                            {/* SHA256(T‖Q‖D) verification */}
+                            {descAcceptedHash !== null && (
+                                <div className="flex items-start gap-2 text-xs">
+                                    <span className={`shrink-0 font-bold ${
+                                        descVerifyStatus === "checking" ? "text-blue-500" :
+                                        descVerifyStatus === "ok"       ? "text-green-700" :
+                                        descVerifyStatus === "fail"     ? "text-red-700" : "text-gray-400"
+                                    }`}>{descVerifyStatus === "checking" ? "…" : descVerifyStatus === "ok" ? "✓" : descVerifyStatus === "fail" ? "✗" : "·"}</span>
+                                    <div>
+                                        <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D) == d</span>
+                                        <span className="text-gray-500 ml-1">— verified locally in your browser</span>
+                                        {descVerifyStatus === "fail" && (
+                                            <p className="mt-1 font-semibold text-red-800">⚠ Verification FAILED — T, Q, or D does not match d!</p>
+                                        )}
+                                        {descVerifyStatus === "ok" && (
+                                            <div className="mt-0.5 text-green-700">
+                                                <p>Authentic — SHA256(T ‖ Q ‖ D) matches the committed d.</p>
+                                                <div className="mt-1 font-mono text-[10px] space-y-0.5 text-gray-600">
+                                                    <p><span className="text-gray-400 select-none">d (accepted) </span>{descAcceptedHash ?? "…"}</p>
+                                                    <p><span className="text-gray-400 select-none">computed     </span>{descComputedHash ?? "…"}</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     );
                 })()}
 
-                {/* Extended image crop: show crop preview and crop hash verification */}
-                {listing_type === "image" && (algorithm_suite === "extended_image_crop" || algorithm_suite === "extended_image_dual") && preview_crop_image && (
-                    <div className="col-span-2 rounded border bg-blue-50 border-blue-200 p-3 text-sm">
-                        <p className="font-semibold text-gray-800 mb-2">Native-res Crop (256×256 px)</p>
-                        <div className="flex items-start gap-3">
-                            <img
-                                src={preview_crop_image}
-                                alt="Crop"
-                                className="w-32 h-32 object-contain border border-gray-200 rounded cursor-zoom-in shrink-0"
-                                onClick={() => setLightboxSrc(preview_crop_image)}
-                            />
-                            <div className="text-xs text-gray-500 space-y-0.5">
-                                {ext_img_crop_x != null && <p>Origin: {ext_img_crop_x}×{ext_img_crop_y} px (native)</p>}
-                                {ext_img_crop_hash && <p className="font-mono break-all">Hash: {ext_img_crop_hash.slice(0, 20)}…</p>}
-                            </div>
-                        </div>
-                    </div>
-                )}
-
                 {listing_type === "image" && (
                     <>
-                        {/* Preview image */}
-                        <div className="col-span-2 flex items-start gap-4 p-3 rounded border bg-gray-50 border-gray-200">
-                            {preview_image && (
-                                <div
-                                    className="overflow-hidden rounded border border-gray-200 shrink-0 cursor-zoom-in"
-                                    style={{
-                                        ...(ext_img_width && ext_img_height
-                                            ? {
-                                                aspectRatio: `${ext_img_width}/${ext_img_height}`,
-                                                maxHeight: "200px",
-                                                width: ext_img_width > ext_img_height
-                                                    ? "min(100%, 320px)"
-                                                    : `${Math.round(200 * ext_img_width / ext_img_height)}px`,
-                                              }
-                                            : { maxHeight: "180px", maxWidth: "240px" }),
-                                    }}
-                                    onClick={() => setLightboxSrc(preview_image)}
-                                >
-                                    <img
-                                        src={preview_image}
-                                        alt="Listing preview"
-                                        className={`w-full h-full ${ext_img_width && ext_img_height ? "object-fill" : "object-contain"}`}
-                                    />
-                                </div>
-                            )}
-                            <div className="text-sm space-y-1">
-                                <p className="font-semibold text-gray-800">Advertised Preview</p>
-                                <p className="text-gray-500 text-xs">
-                                    This is what the vendor claims the image looks like. After accepting and decrypting, verify the file matches this preview exactly.
-                                </p>
-                                {algorithm_suite === "extended_image" ? (
-                                    <div className="mt-1 text-xs text-gray-600 space-y-0.5">
-                                        {ext_img_width != null && <p>Width: {ext_img_width} px</p>}
-                                        {ext_img_height != null && <p>Height: {ext_img_height} px</p>}
-                                        {ext_img_size != null && <p>Size: {ext_img_size.toLocaleString()} B</p>}
-                                        {ext_img_thumb_hash && (
-                                            <p className="font-mono break-all">Thumb hash: {ext_img_thumb_hash.slice(0, 20)}…</p>
-                                        )}
-                                    </div>
-                                ) : brisque_value != null ? (
-                                    <span className={`inline-block text-xs px-2 py-0.5 rounded font-medium mt-1 ${
-                                        brisque_value < 30 ? "bg-green-100 text-green-800" :
-                                        brisque_value < 60 ? "bg-yellow-100 text-yellow-800" :
-                                        "bg-red-100 text-red-800"
-                                    }`}>
-                                        Claimed BRISQUE {brisque_value.toFixed(1)} · {brisque_value < 30 ? "Good" : brisque_value < 60 ? "Average" : "Low"} quality
-                                    </span>
-                                ) : null}
-                            </div>
-                        </div>
-
-                        {/* Extended image: description summary + preview verification */}
-                        {(algorithm_suite === "extended_image" || algorithm_suite === "extended_image_crop" || algorithm_suite === "extended_image_dual") && (() => {
-                            const descHex = (item_description || "").replace(/^0x/, "");
-                            const descBytes = descHex.length / 2;
-                            const isCrop = algorithm_suite === "extended_image_crop";
-                            const isDual = algorithm_suite === "extended_image_dual";
-                            // expected sizes: extended_image=76, extended_image_crop=84, extended_image_dual=116
-                            const expectedBytes = isCrop ? 84 : isDual ? 116 : 76;
-                            const isLegacy = descBytes < expectedBytes;
-                            const dShaHex = !isLegacy ? descHex.slice(0, 64) : descHex;
-                            // extended_image / dual: d_thumb at [32..64]; crop: d_crop at [32..64]
-                            const dField1Hex = !isLegacy ? descHex.slice(64, 128) : null;
-                            // dual only: d_crop at [64..96]
-                            const dCropHex  = isDual && !isLegacy ? descHex.slice(128, 192) : null;
-                            const metaOff   = isDual ? 192 : 128;
-                            const dWidth    = !isLegacy ? parseInt(descHex.slice(metaOff, metaOff + 8), 16) : null;
-                            const dHeight   = !isLegacy ? parseInt(descHex.slice(metaOff + 8, metaOff + 16), 16) : null;
-                            const dSize     = !isLegacy ? parseInt(descHex.slice(metaOff + 16, metaOff + 24), 16) : null;
-                            const field1Label = isCrop ? "d_crop " : "d_thumb";
-                            const listingHash = isCrop ? ext_img_crop_hash : ext_img_thumb_hash;
+                        {/* desc V3 buyer pre-payment verification: SHA256(T ‖ Q ‖ D) = d */}
+                        {desc_d && (() => {
+                            // Parse D (dim bytes) as sequence of BE u32s
+                            const dimHex = (desc_dim || "").replace(/^0x/, "");
+                            const dimU32s: number[] = [];
+                            for (let i = 0; i + 7 < dimHex.length; i += 8) {
+                                dimU32s.push(parseInt(dimHex.slice(i, i + 8), 16));
+                            }
+                            // Determine label based on number of u32 values
+                            const dimLabels: [string, number][] = dimU32s.length === 2
+                                ? [["w", dimU32s[0]], ["h", dimU32s[1]]]
+                                : dimU32s.length === 3
+                                ? [["dur", dimU32s[0]], ["sr", dimU32s[1]], ["n_samp", dimU32s[2]]]
+                                : dimU32s.length === 4
+                                ? [["w", dimU32s[0]], ["h", dimU32s[1]], ["cx", dimU32s[2]], ["cy", dimU32s[3]]]
+                                : dimU32s.map((v, i) => [`u32[${i}]`, v] as [string, number]);
+                            const tBytes = desc_thumb ? Math.round(desc_thumb.length * 3 / 4) : 0;
+                            const qBytes = desc_quality ? Math.round(desc_quality.length * 3 / 4) : 0;
+                            const isRms = qBytes === 1024;
                             return (
                             <div className={`col-span-2 rounded border p-3 text-sm ${
-                                previewThumbStatus === "warn"
-                                    ? "bg-red-50 border-red-300"
-                                    : previewThumbStatus === "ok"
-                                    ? "bg-green-50 border-green-300"
-                                    : "bg-blue-50 border-blue-200"
+                                descVerifyStatus === "fail"     ? "bg-red-50 border-red-300" :
+                                descVerifyStatus === "ok"       ? "bg-green-50 border-green-300" :
+                                descVerifyStatus === "checking" ? "bg-blue-50 border-blue-200" :
+                                "bg-gray-50 border-gray-200"
                             }`}>
-                                <div className="flex items-center justify-between mb-1">
-                                    <p className="font-semibold text-gray-800">Extended Description (Circuit-verified)</p>
-                                    <span className={`text-xs px-2 py-0.5 rounded font-mono font-medium ${isLegacy ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800"}`}>
-                                        {descBytes}B {isLegacy ? `⚠ legacy — expected ${expectedBytes}B` : `✓ ${expectedBytes}B`}
-                                    </span>
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="font-semibold text-gray-800">Description Verification (Circuit-verified)</p>
+                                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                                        descVerifyStatus === "ok"   ? "bg-green-100 text-green-800" :
+                                        descVerifyStatus === "fail" ? "bg-red-100 text-red-800" :
+                                        "bg-gray-100 text-gray-600"
+                                    }`}>SHA256(T ‖ Q ‖ D)</span>
                                 </div>
-                                {/* Description fields */}
-                                <div className="font-mono text-xs text-gray-500 space-y-0.5 mb-2 bg-white/60 rounded p-2">
-                                    <p><span className="text-gray-400">d_sha  </span> {dShaHex.slice(0,32)}…</p>
-                                    {dField1Hex
-                                        ? <p><span className="text-gray-400">{field1Label}</span> {dField1Hex.slice(0,32)}…</p>
-                                        : <p className="text-yellow-700">{field1Label}: not committed (legacy)</p>
-                                    }
-                                    {dCropHex && (
-                                        <p><span className="text-gray-400">d_crop </span> {dCropHex.slice(0,32)}…</p>
-                                    )}
-                                    {dWidth != null && <p><span className="text-gray-400">w×h    </span> {dWidth}×{dHeight} px · size {dSize?.toLocaleString()} B</p>}
-                                    {listingHash && dField1Hex && (
-                                        <p className={dField1Hex === listingHash.replace(/^0x/,"") ? "text-green-700" : "text-red-700"}>
-                                            {field1Label} vs listing: {dField1Hex === listingHash.replace(/^0x/,"") ? "✓ match" : "✗ MISMATCH"}
-                                        </p>
-                                    )}
-                                    {isDual && dCropHex && ext_img_crop_hash && (
-                                        <p className={dCropHex === ext_img_crop_hash.replace(/^0x/,"") ? "text-green-700" : "text-red-700"}>
-                                            d_crop  vs listing: {dCropHex === ext_img_crop_hash.replace(/^0x/,"") ? "✓ match" : "✗ MISMATCH"}
-                                        </p>
-                                    )}
+                                <p className="text-xs text-gray-500 mb-3">
+                                    The vendor publishes T (preview), Q (quality map), and D (metadata).
+                                    Your browser verifies SHA256(T ‖ Q ‖ D) = d before you pay — no ciphertext required.
+                                </p>
+
+                                {/* Visual previews of T and Q */}
+                                {(descThumbDataUrl || descQualityDataUrl) && (
+                                    <div className="flex gap-3 mb-3">
+                                        {descThumbDataUrl && (
+                                            <div className="flex-1">
+                                                <p className="text-xs text-gray-500 mb-1 font-medium">
+                                                    T — {tBytes >= 2 * 196608 ? "lowres ‖ crop (256×256 each)" : tBytes >= 196608 ? "256×256 thumbnail" : "preview"}
+                                                    <span className="text-gray-400 ml-1">({tBytes.toLocaleString()} B)</span>
+                                                </p>
+                                                <img
+                                                    src={descThumbDataUrl}
+                                                    alt="T preview"
+                                                    className={`${tBytes >= 2 * 196608 ? "w-64 h-32" : "w-32 h-32"} object-contain border border-gray-200 rounded cursor-zoom-in`}
+                                                    onClick={() => setLightboxSrc(descThumbDataUrl)}
+                                                />
+                                                {tBytes >= 2 * 196608 && (
+                                                    <p className="text-xs text-gray-400 mt-0.5">Left: lowres · Right: crop</p>
+                                                )}
+                                            </div>
+                                        )}
+                                        {descQualityDataUrl && (
+                                            <div className="flex-1">
+                                                <p className="text-xs text-gray-500 mb-1 font-medium">
+                                                    Q — {isRms ? "256-segment RMS profile" : "ELA-light sharpness map (256×256)"}
+                                                    <span className="text-gray-400 ml-1">({qBytes.toLocaleString()} B)</span>
+                                                </p>
+                                                <img
+                                                    src={descQualityDataUrl}
+                                                    alt="Q quality"
+                                                    className={`${isRms ? "w-full h-16" : "w-32 h-32"} object-contain border border-gray-200 rounded cursor-zoom-in`}
+                                                    style={isRms ? { imageRendering: "pixelated" } : {}}
+                                                    onClick={() => setLightboxSrc(descQualityDataUrl)}
+                                                />
+                                                {!isRms && (
+                                                    <p className="text-xs text-gray-400 mt-0.5">
+                                                        Bright = high-frequency edge. Flat areas = dark, sharp edges = bright.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* D metadata */}
+                                <div className="font-mono text-xs text-gray-500 space-y-0.5 bg-white/60 rounded p-2 mb-2">
+                                    <p className="font-sans text-xs font-semibold text-gray-600 mb-1">D — Dimensions</p>
+                                    {dimLabels.map(([label, val]) => (
+                                        <p key={label}><span className="text-gray-400">{label.padEnd(6)}</span> {label === "sr" ? `${val.toLocaleString()} Hz` : label === "dur" ? `${val} s` : label === "n_samp" ? val.toLocaleString() : `${val} px`}</p>
+                                    ))}
+                                    <p className="mt-1 pt-1 border-t border-gray-200">
+                                        <span className="text-gray-400 font-sans">d</span>
+                                        <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D))</span>
+                                        {(descAcceptedHash ?? "").slice(0, 32)}…
+                                    </p>
                                 </div>
-                                {/* thumbnail preview check (only for formats that have d_thumb) */}
-                                {!isCrop && (
-                                <div className="flex items-start gap-2 text-xs mt-1">
+
+                                {/* Verification result */}
+                                <div className="flex items-start gap-2 text-xs">
                                     <span className={`shrink-0 font-bold ${
-                                        previewThumbStatus === "checking" ? "text-blue-500" :
-                                        previewThumbStatus === "ok"       ? "text-green-700" :
-                                        previewThumbStatus === "warn"     ? "text-red-700" :
+                                        descVerifyStatus === "checking" ? "text-blue-500" :
+                                        descVerifyStatus === "ok"       ? "text-green-700" :
+                                        descVerifyStatus === "fail"     ? "text-red-700" :
                                         "text-gray-400"
                                     }`}>
-                                        {previewThumbStatus === "checking" ? "…" :
-                                         previewThumbStatus === "ok"       ? "✓" :
-                                         previewThumbStatus === "warn"     ? "✗" :
-                                         !preview_image                    ? "N/A" : "·"}
+                                        {descVerifyStatus === "checking" ? "…" :
+                                         descVerifyStatus === "ok"       ? "✓" :
+                                         descVerifyStatus === "fail"     ? "✗" : "·"}
                                     </span>
                                     <div>
-                                        <span className="font-medium text-gray-700">
-                                            SHA256(256×256 BGR thumbnail) == d_thumb
-                                        </span>
-                                        <span className="text-gray-500 ml-1">
-                                            {isLegacy ? `— cannot check (legacy ${descBytes}B description)` :
-                                             !preview_image ? "— no preview image available" :
-                                             "— verified locally in your browser"}
-                                        </span>
-                                        {previewThumbStatus === "warn" && (
+                                        <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D) == d</span>
+                                        <span className="text-gray-500 ml-1">— verified locally in your browser</span>
+                                        {descVerifyStatus === "fail" && (
                                             <p className="mt-1 font-semibold text-red-800">
-                                                ⚠ Preview does NOT match d_thumb — vendor uploaded a different image!
+                                                ⚠ Verification FAILED — T, Q, or D does not match d!
                                             </p>
                                         )}
-                                        {previewThumbStatus === "ok" && (
-                                            <p className="mt-0.5 text-green-700">
-                                                Preview matches committed d_thumb exactly.
-                                            </p>
+                                        {descVerifyStatus === "ok" && (
+                                            <div className="mt-0.5 text-green-700">
+                                                <p>Authentic — SHA256(T ‖ Q ‖ D) matches the committed d.</p>
+                                                <div className="mt-1 font-mono text-[10px] space-y-0.5 text-gray-600">
+                                                    <p><span className="text-gray-400 select-none">d (accepted) </span>{descAcceptedHash ?? "…"}</p>
+                                                    <p><span className="text-gray-400 select-none">computed     </span>{descComputedHash ?? "…"}</p>
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
-                                )}
                             </div>
                             );
                         })()}
 
-                        {/* ZK / Quality Commitment Verification (default and zk only) */}
-                        {algorithm_suite !== "extended_image" && algorithm_suite !== "extended_image_crop" && algorithm_suite !== "extended_image_dual" && (
-                        <div className={`col-span-2 rounded border p-3 text-sm ${
-                            zkStatus === "invalid" ? "bg-red-50 border-red-300" :
-                            zkStatus === "valid"   ? "bg-green-50 border-green-300" :
-                            zkStatus === "unavailable" ? "bg-gray-50 border-gray-200" :
-                            "bg-blue-50 border-blue-200"
-                        }`}>
-                            <div className="flex items-center justify-between mb-2">
-                                <p className="font-semibold text-gray-800">
-                                    Quality Commitment Verification
-                                </p>
-                                <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                                    zk_proof_full ? "bg-purple-100 text-purple-800" : "bg-gray-100 text-gray-600"
-                                }`}>
-                                    {zk_proof_full ? "SP1 ZK Proof" : zk_proof ? "Hash Commitment" : "No proof"}
-                                </span>
-                            </div>
-                            <p className="text-xs text-gray-500 mb-3">
-                                {zk_proof_full
-                                    ? "The vendor attached a cryptographic ZK proof (SP1/Groth16) that the sold image matches the advertised preview and BRISQUE score."
-                                    : zk_proof
-                                    ? "The vendor committed to the advertised thumbnail hash and BRISQUE score at the time of the sale. This is a hash-based commitment, not a full ZK proof."
-                                    : "No quality commitment was attached to this precontract."}
-                            </p>
-
-                            {zk_proof ? (
-                                <div className="space-y-1.5">
-                                    {/* Check 0: h_pt on-chain binding */}
-                                    {zk_h_ct && (
-                                        <div className="flex items-start gap-2 text-xs">
-                                            <span className={`shrink-0 font-bold ${
-                                                zkChecks?.hPtMatch === undefined ? "text-gray-400" :
-                                                zkChecks.hPtMatch ? "text-green-700" : "text-red-700"
-                                            }`}>
-                                                {zkChecks?.hPtMatch === undefined ? "·" : zkChecks.hPtMatch ? "✓" : "✗"}
-                                            </span>
-                                            <div>
-                                                <span className="font-medium text-gray-700">Plaintext hash matches precontract (SHA256(pt) = d)</span>
-                                                <span className="text-gray-500 ml-1">— ZK proof binds sold image to on-chain commitment</span>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Check 1: Thumbnail hash */}
-                                    <div className="flex items-start gap-2 text-xs">
-                                        <span className={`shrink-0 font-bold ${
-                                            zkChecks?.thumbnailMatch === undefined ? "text-gray-400" :
-                                            zkChecks.thumbnailMatch ? "text-green-700" : "text-red-700"
-                                        }`}>
-                                            {zkChecks?.thumbnailMatch === undefined ? "·" : zkChecks.thumbnailMatch ? "✓" : "✗"}
-                                        </span>
-                                        <div>
-                                            <span className="font-medium text-gray-700">Preview hash matches</span>
-                                            <span className="text-gray-500 ml-1">— the proof was generated for this exact thumbnail</span>
-                                            {preview_hash && (
-                                                <p className="font-mono text-gray-400 mt-0.5">{preview_hash.slice(0, 20)}…</p>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Check 2: BRISQUE match */}
-                                    <div className="flex items-start gap-2 text-xs">
-                                        <span className={`shrink-0 font-bold ${
-                                            zkChecks?.brisqueMatch === undefined ? "text-gray-400" :
-                                            zkChecks.brisqueMatch ? "text-green-700" : "text-red-700"
-                                        }`}>
-                                            {zkChecks?.brisqueMatch === undefined ? "·" : zkChecks.brisqueMatch ? "✓" : "✗"}
-                                        </span>
-                                        <div>
-                                            <span className="font-medium text-gray-700">BRISQUE score matches claim</span>
-                                            {zk_brisque != null && brisque_value != null && (
-                                                <span className="text-gray-500 ml-1">
-                                                    — proven {zk_brisque.toFixed(1)} vs claimed {brisque_value.toFixed(1)} (±2 tolerance)
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Check 3: Cryptographic verification */}
-                                    <div className="flex items-start gap-2 text-xs">
-                                        <span className={`shrink-0 font-bold ${
-                                            zkStatus === "verifying" ? "text-blue-500" :
-                                            zkChecks?.cryptoValid === undefined ? "text-gray-400" :
-                                            zkChecks.cryptoValid ? "text-green-700" : "text-red-700"
-                                        }`}>
-                                            {zkStatus === "verifying" ? "…" :
-                                             zkChecks?.cryptoValid === undefined ? "·" :
-                                             zkChecks.cryptoValid ? "✓" : "✗"}
-                                        </span>
-                                        <div>
-                                            <span className="font-medium text-gray-700">
-                                                {zk_proof_full ? "Cryptographic proof valid (Groth16)" : "Hash commitment valid (SHA-256)"}
-                                            </span>
-                                            <span className="text-gray-500 ml-1">
-                                                {zkStatus === "verifying"
-                                                    ? "— verifying…"
-                                                    : zk_proof_full
-                                                    ? "— verified locally via zk-host (no server)"
-                                                    : "— verified in your browser (Web Crypto API, no server)"}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Overall result */}
-                                    {zkStatus === "valid" && (
-                                        <p className="mt-2 text-xs font-semibold text-green-800">
-                                            ✓ All checks passed. The vendor's quality commitment is valid.
-                                        </p>
-                                    )}
-                                    {zkStatus === "invalid" && (
-                                        <p className="mt-2 text-xs font-semibold text-red-800">
-                                            ✗ Verification failed: {zkReason}. Do not accept this contract.
-                                        </p>
-                                    )}
-                                </div>
-                            ) : (
-                                <p className="text-xs text-gray-500 italic">
-                                    No commitment to verify. Proceed with caution — the advertised quality is unverified.
-                                </p>
-                            )}
-                        </div>
-                        )}
                     </>
                 )}
 
                 <div><strong>Contract ID:</strong> {id}</div>
                 <div>
                     <strong>Price:</strong> {price} ETH
-                    <ChfNote value={price} display="block" />
                 </div>
                 <div className="col-span-2 font-mono text-sm">
                     <strong>Vendor:</strong> {pk_vendor}
@@ -932,19 +1032,15 @@ export default function NonAcceptedPrecontractModal({
                 </div>
                 <div>
                     <strong>Tip Completion:</strong> {tip_completion} ETH
-                    <ChfNote value={tip_completion} display="block" />
                 </div>
                 <div>
                     <strong>Tip Dispute:</strong> {tip_dispute} ETH
-                    <ChfNote value={tip_dispute} display="block" />
                 </div>
                 <div><strong>Timeout:</strong> {timeout_delay} s</div>
                 <div><strong>Protocol Version:</strong> {protocol_version}</div>
                 <div>
                     <strong>Algorithm:</strong>{" "}
-                    {algorithm_suite === "zk" ? (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1)</span>
-                    ) : algorithm_suite === "extended_image" ? (
+                    {algorithm_suite === "extended_image" ? (
                         <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc (Thumb 256×256)</span>
                     ) : algorithm_suite === "extended_image_crop" ? (
                         <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc (Crop native-res)</span>
@@ -1000,6 +1096,22 @@ export default function NonAcceptedPrecontractModal({
                                     <p className="text-xs mt-1 text-green-700">
                                         Accumulators saved to localStorage.
                                     </p>
+                                    {ctSize != null && (
+                                        <div className="mt-2 pt-2 border-t border-green-300 font-mono text-xs space-y-0.5">
+                                            <p className="font-sans font-semibold text-green-800 mb-1">File Size Info</p>
+                                            {origSize != null && (
+                                                <p><span className="text-green-600">Plaintext </span>{formatBytes(origSize)} <span className="text-green-500">({origSize.toLocaleString()} B)</span></p>
+                                            )}
+                                            <p><span className="text-green-600">CT (LZ4)  </span>{formatBytes(ctSize)} <span className="text-green-500">({ctSize.toLocaleString()} B)</span></p>
+                                            {origSize != null && origSize > 0 && (() => {
+                                                const savedBytes = origSize - ctSize;
+                                                const pct = Math.round((savedBytes / origSize) * 100);
+                                                return savedBytes > 0
+                                                    ? <p><span className="text-green-600">Saved     </span>{pct}% ({formatBytes(savedBytes)})</p>
+                                                    : <p><span className="text-green-600">Overhead  </span>+{formatBytes(-savedBytes)} <span className="text-green-500">(incompressible)</span></p>;
+                                            })()}
+                                        </div>
+                                    )}
                                 </>
                             ) : (
                                 <>
@@ -1018,15 +1130,10 @@ export default function NonAcceptedPrecontractModal({
                         label="Accept"
                         onClick={handleAccept}
                         width="1/2"
-                        isDisabled={zkStatus === "invalid" || previewThumbStatus === "warn" || audioPreviewStatus === "warn"}
+                        isDisabled={previewThumbStatus === "warn" || audioPreviewStatus === "warn"}
                     />
                     <Button label="Reject" onClick={handleReject} width="1/2" />
                 </div>
-                {zkStatus === "invalid" && (
-                    <p className="col-span-2 text-xs text-red-700 font-medium text-center bg-red-50 border border-red-200 rounded p-2">
-                        ⚠ Accept is blocked: quality commitment verification failed. {zkReason && `(${zkReason})`}
-                    </p>
-                )}
                 {previewThumbStatus === "warn" && (
                     <p className="col-span-2 text-xs text-red-700 font-medium text-center bg-red-50 border border-red-200 rounded p-2">
                         ⚠ Accept is blocked: the advertised preview does not match the committed description (d_thumb mismatch).

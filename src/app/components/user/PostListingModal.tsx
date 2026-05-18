@@ -6,7 +6,6 @@ import Modal from "../common/Modal";
 import Button from "../common/Button";
 import FormTextField from "../common/FormTextField";
 import FormSelect from "../common/FormSelect";
-import { useEthChfRate, ethToCHF } from "@/app/lib/useEthChfRate";
 import { useToast } from "@/app/lib/ToastContext";
 import { CANONICAL_FPS, canonicalVideoDims } from "@/app/lib/videoCanonical";
 
@@ -47,6 +46,39 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
         r.onload = () => resolve(r.result as string);
         r.onerror = reject;
         r.readAsDataURL(blob);
+    });
+}
+
+/**
+ * Measures the native fps of a video element by collecting frame timestamps via
+ * requestVideoFrameCallback (Chrome 83+, Firefox 132+). Falls back to 30 fps.
+ * Plays ~6 frames worth from currentTime=0 at normal speed, then pauses.
+ */
+async function detectVideoFps(video: HTMLVideoElement): Promise<number> {
+    const rvfc = (video as any).requestVideoFrameCallback?.bind(video);
+    if (!rvfc) return 30;
+    return new Promise<number>(resolve => {
+        const times: number[] = [];
+        let done = false;
+        const finish = (fps: number) => {
+            if (done) return; done = true;
+            video.pause();
+            resolve(fps);
+        };
+        const cb = (_: number, meta: { mediaTime: number }) => {
+            times.push(meta.mediaTime);
+            if (times.length < 6) { rvfc(cb); return; }
+            const diffs = times.slice(1).map((t, i) => t - times[i]);
+            const avg = diffs.reduce((a, b) => a + b) / diffs.length;
+            const raw = avg > 0 ? 1 / avg : 30;
+            // Round to nearest standard rate
+            const std = [24, 25, 30, 50, 60];
+            finish(std.reduce((a, b) => Math.abs(a - raw) < Math.abs(b - raw) ? a : b));
+        };
+        rvfc(cb);
+        video.currentTime = 0;
+        video.play().catch(() => finish(30));
+        setTimeout(() => finish(30), 3000);
     });
 }
 
@@ -346,10 +378,162 @@ function computeCropBytesFromBmp(bmpBytes: Uint8Array, imgW: number, imgH: numbe
     return out;
 }
 
+// ── desc V3 helpers ──────────────────────────────────────────────────────────
+
+/** Encode Uint8Array to base64 without stack overflow on large buffers. */
+function uint8ToBase64(bytes: Uint8Array): string {
+    let s = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        s += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(s);
+}
+
+/**
+ * Compute ELA-light quality map from the full-resolution BMP.
+ * Matches ela-light.py and desc.rs exactly:
+ *   1. Grayscale: (B+G+R)//3  (integer average, BMP is BGR bottom-to-top)
+ *   2. Discrete 4-neighbour Laplacian with same-pixel boundary padding
+ *   3. Amplify x10, clamp to [0,255]
+ *   4. Tile-average to 256x256 via integer partitioning
+ * Returns 65536 raw grayscale bytes (Q).
+ */
+function computeElaLightFullRes(bmpBytes: Uint8Array, imgW: number, imgH: number): Uint8Array {
+    const rowStride = (imgW * 3 + 3) & ~3;
+    const npix = imgW * imgH;
+
+    // Step 1: full-res grayscale (BMP rows are bottom-to-top)
+    const gray = new Int32Array(npix);
+    for (let y = 0; y < imgH; y++) {
+        const bmpRow = imgH - 1 - y;
+        const rowBase = 54 + bmpRow * rowStride;
+        for (let x = 0; x < imgW; x++) {
+            const s = rowBase + x * 3;
+            gray[y * imgW + x] = (bmpBytes[s] + bmpBytes[s + 1] + bmpBytes[s + 2]) / 3 | 0;
+        }
+    }
+
+    // Step 2: discrete Laplacian with same-pixel boundary padding; amplify x10 clamp
+    const lap = new Uint8Array(npix);
+    for (let y = 0; y < imgH; y++) {
+        for (let x = 0; x < imgW; x++) {
+            const c = gray[y * imgW + x];
+            const t  = y > 0        ? gray[(y - 1) * imgW + x] : c;
+            const b2 = y + 1 < imgH ? gray[(y + 1) * imgW + x] : c;
+            const l  = x > 0        ? gray[y * imgW + (x - 1)] : c;
+            const r  = x + 1 < imgW ? gray[y * imgW + (x + 1)] : c;
+            lap[y * imgW + x] = Math.min(10 * Math.abs(4 * c - t - b2 - l - r), 255);
+        }
+    }
+
+    // Step 3: tile-average to 256x256 (integer partitioning, matches Rust/Python)
+    const out = new Uint8Array(256 * 256);
+    for (let oy = 0; oy < 256; oy++) {
+        const r0 = (oy * imgH / 256) | 0;
+        const r1 = Math.max(((oy + 1) * imgH / 256) | 0, r0 + 1);
+        for (let ox = 0; ox < 256; ox++) {
+            const c0 = (ox * imgW / 256) | 0;
+            const c1 = Math.max(((ox + 1) * imgW / 256) | 0, c0 + 1);
+            let sum = 0, count = 0;
+            for (let ty = r0; ty < r1; ty++)
+                for (let tx = c0; tx < c1; tx++) { sum += lap[ty * imgW + tx]; count++; }
+            out[oy * 256 + ox] = (sum / count) | 0;
+        }
+    }
+    return out;
+}
+
+/** Compute second-difference quality proxy (256 segments × u32-BE = 1024 bytes, matches desc.rs).
+ *  Q[seg] = mean(|pcm[i+2] - 2·pcm[i+1] + pcm[i]|) — discrete Laplacian / ∇².
+ *  Pure integer arithmetic; ~21× higher for genuine full-res vs upsampled lowres. */
+function computeSecondDiffQuality(pcmInt16: Int16Array, nSamp: number): Uint8Array {
+    const M = 256;
+    const nD2 = Math.max(0, nSamp - 2);
+    const segSize = Math.max(1, Math.floor(nD2 / M));
+    const out = new Uint8Array(M * 4);
+    const view = new DataView(out.buffer);
+    for (let seg = 0; seg < M; seg++) {
+        const start = seg * segSize;
+        const end = Math.min((seg + 1) * segSize, nD2);
+        const count = Math.max(0, end - start);
+        let sum = 0;
+        for (let i = start; i < end; i++) {
+            const a = pcmInt16[i];
+            const b = pcmInt16[i + 1];
+            const c = pcmInt16[i + 2];
+            sum += Math.abs(c - 2 * b + a);
+        }
+        const mean = count > 0 ? Math.trunc(sum / count) : 0;
+        view.setUint32(seg * 4, mean, false); // big-endian u32
+    }
+    return out;
+}
+
+/**
+ * ELA-light from a top-to-bottom RGBA pixel array (e.g. from canvas.getImageData).
+ * Same algorithm as computeElaLightFullRes but without BMP-specific layout.
+ */
+function computeElaLightFromRGBA(rgba: Uint8ClampedArray, imgW: number, imgH: number): Uint8Array {
+    const npix = imgW * imgH;
+    const gray = new Int32Array(npix);
+    for (let i = 0; i < npix; i++)
+        gray[i] = (rgba[i * 4] + rgba[i * 4 + 1] + rgba[i * 4 + 2]) / 3 | 0;
+    const lap = new Uint8Array(npix);
+    for (let y = 0; y < imgH; y++) {
+        for (let x = 0; x < imgW; x++) {
+            const c  = gray[y * imgW + x];
+            const t  = y > 0        ? gray[(y - 1) * imgW + x] : c;
+            const b2 = y + 1 < imgH ? gray[(y + 1) * imgW + x] : c;
+            const l  = x > 0        ? gray[y * imgW + (x - 1)] : c;
+            const r  = x + 1 < imgW ? gray[y * imgW + (x + 1)] : c;
+            lap[y * imgW + x] = Math.min(10 * Math.abs(4 * c - t - b2 - l - r), 255);
+        }
+    }
+    const out = new Uint8Array(256 * 256);
+    for (let oy = 0; oy < 256; oy++) {
+        const r0 = (oy * imgH / 256) | 0;
+        const r1 = Math.max(((oy + 1) * imgH / 256) | 0, r0 + 1);
+        for (let ox = 0; ox < 256; ox++) {
+            const c0 = (ox * imgW / 256) | 0;
+            const c1 = Math.max(((ox + 1) * imgW / 256) | 0, c0 + 1);
+            let sum = 0, count = 0;
+            for (let ty = r0; ty < r1; ty++)
+                for (let tx = c0; tx < c1; tx++) { sum += lap[ty * imgW + tx]; count++; }
+            out[oy * 256 + ox] = (sum / count) | 0;
+        }
+    }
+    return out;
+}
+
+/** Compute d = SHA256(T ‖ Q ‖ D) and encode T/Q/D for storage. */
+async function computeDescV3(
+    thumbParts: Uint8Array[],
+    quality: Uint8Array,
+    dimBytes: Uint8Array,
+): Promise<{ dHex: string; dimHex: string; thumbBase64: string; qualityBase64: string }> {
+    const tLen = thumbParts.reduce((a, p) => a + p.length, 0);
+    const tqd = new Uint8Array(tLen + quality.length + dimBytes.length);
+    let off = 0;
+    for (const p of thumbParts) { tqd.set(p, off); off += p.length; }
+    tqd.set(quality, off); off += quality.length;
+    tqd.set(dimBytes, off);
+    const hashBuf = await crypto.subtle.digest("SHA-256", tqd);
+    const d = new Uint8Array(hashBuf);
+    const dHex = Array.from(d).map(b => b.toString(16).padStart(2, "0")).join("");
+    const dimHex = Array.from(dimBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+    const t = tqd.subarray(0, tLen);
+    return { dHex, dimHex, thumbBase64: uint8ToBase64(t), qualityBase64: uint8ToBase64(quality) };
+}
+
+/** Build big-endian u32 bytes. */
+function beU32(n: number): [number, number, number, number] {
+    return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
+}
+
 /** Decode any audio file to a mono Int16-LE PCM preview at the ORIGINAL sample rate.
- *  Budget: 240 000 samples = 480 000 bytes (circuit constant).
- *  The audio is simply cropped — Hz and quality are NOT changed.
- *  Duration = min(full length, 240 000 / sampleRate). */
+ *  Also decodes the full file for quality computation (Q over entire audio, matching Python).
+ *  Preview budget: 240 000 samples = 480 000 bytes (circuit constant). */
 async function buildAudioPreview(file: File): Promise<{
     wavDataUrl: string;
     previewHash: string;
@@ -357,6 +541,8 @@ async function buildAudioPreview(file: File): Promise<{
     bitrateKbps: number;
     pcmBytes: Uint8Array;
     sampleRate: number;
+    fullPcmInt16: Int16Array;
+    totalSamples: number;
 }> {
     const arrayBuffer = await file.arrayBuffer();
     const tempCtx = new AudioContext();
@@ -368,10 +554,10 @@ async function buildAudioPreview(file: File): Promise<{
 
     // Keep the original sample rate — Web Audio supports up to 96 000 Hz.
     const sampleRate = Math.min(audioBuffer.sampleRate, 96_000);
-    // Crop to however many samples fit in the budget (no padding for longer audio).
-    const actualSamples = Math.min(AUDIO_CROP_SAMPLES, Math.round(audioBuffer.duration * sampleRate));
+    const totalSamples = Math.round(audioBuffer.duration * sampleRate);
 
-    const offlineCtx = new OfflineAudioContext(1, actualSamples, sampleRate);
+    // Decode full audio once — used for both T (preview crop) and Q (full file, matching Python).
+    const offlineCtx = new OfflineAudioContext(1, totalSamples, sampleRate);
     const src = offlineCtx.createBufferSource();
     src.buffer = audioBuffer;
     src.connect(offlineCtx.destination);
@@ -379,11 +565,15 @@ async function buildAudioPreview(file: File): Promise<{
     const rendered = await offlineCtx.startRendering();
     const channelData = rendered.getChannelData(0);
 
-    // Container PCM: always AUDIO_CROP_BYTES (zero-padded when audio is short).
-    const pcmInt16 = new Int16Array(AUDIO_CROP_SAMPLES); // zero-initialised
-    for (let i = 0; i < actualSamples; i++) {
-        pcmInt16[i] = Math.max(-32768, Math.min(32767, Math.round(channelData[i] * 32767)));
+    const fullPcmInt16 = new Int16Array(totalSamples);
+    for (let i = 0; i < totalSamples; i++) {
+        fullPcmInt16[i] = Math.max(-32768, Math.min(32767, Math.round(channelData[i] * 32767)));
     }
+
+    // Container PCM T: first AUDIO_CROP_SAMPLES (zero-padded when audio is short).
+    const cropSamples = Math.min(AUDIO_CROP_SAMPLES, totalSamples);
+    const pcmInt16 = new Int16Array(AUDIO_CROP_SAMPLES); // zero-initialised
+    for (let i = 0; i < cropSamples; i++) pcmInt16[i] = fullPcmInt16[i];
     const pcmBytes = new Uint8Array(pcmInt16.buffer);
 
     // SHA256 over full 480 000 bytes (circuit constant)
@@ -391,8 +581,8 @@ async function buildAudioPreview(file: File): Promise<{
     const previewHash = Array.from(new Uint8Array(hashBuf))
         .map(b => b.toString(16).padStart(2, "0")).join("");
 
-    // Preview WAV: only actualSamples × 2 bytes — no trailing silence.
-    const wavByteCount = actualSamples * 2;
+    // Preview WAV: only cropSamples × 2 bytes — no trailing silence.
+    const wavByteCount = cropSamples * 2;
     const wavBuf = new ArrayBuffer(44 + wavByteCount);
     const v = new DataView(wavBuf);
     v.setUint32(0,  0x52494646, false); // "RIFF"
@@ -419,12 +609,13 @@ async function buildAudioPreview(file: File): Promise<{
         reader.readAsDataURL(wavBlob);
     });
 
-    return { wavDataUrl, previewHash, durationSecs, bitrateKbps, pcmBytes, sampleRate };
+    return { wavDataUrl, previewHash, durationSecs, bitrateKbps, pcmBytes, sampleRate, fullPcmInt16, totalSamples };
 }
 
 /** Decode file to full mono Int16 PCM and compute the decimated lowres hash.
  *  Stride K = ⌈total_samples / AUDIO_LOWRES_SAMPLES⌉ is derived from the actual duration,
  *  mirroring how the circuit reads K from the header field total_samples.
+ *  PCM is zero-padded so unclamped index i*K is always within bounds (matches circuit).
  *  Returns the hash hex, K, total sample count, and original sample rate so the
  *  caller can write the header fields for the canonical container. */
 async function pcmDecimatedHash(file: File): Promise<{
@@ -439,20 +630,22 @@ async function pcmDecimatedHash(file: File): Promise<{
     await tempCtx.close();
     const sampleRate    = Math.min(audioBuffer.sampleRate, 96_000);
     const totalSamples  = Math.round(audioBuffer.duration * sampleRate);
-    const strideK       = Math.ceil(totalSamples / AUDIO_LOWRES_SAMPLES);
+    const strideK       = Math.max(1, Math.ceil(totalSamples / AUDIO_LOWRES_SAMPLES));
+    // pad to cover the last GetByte position and the crop region
+    const nPcmSamples   = Math.max(AUDIO_CROP_SAMPLES, (AUDIO_LOWRES_SAMPLES - 1) * strideK + 1, totalSamples);
     const offCtx = new OfflineAudioContext(1, totalSamples, sampleRate);
     const src = offCtx.createBufferSource();
     src.buffer = audioBuffer; src.connect(offCtx.destination); src.start(0);
     const rendered = await offCtx.startRendering();
     const ch = rendered.getChannelData(0);
-    // Full PCM
-    const fullPcm = new Int16Array(totalSamples);
+    // Full PCM, zero-padded to nPcmSamples
+    const fullPcm = new Int16Array(nPcmSamples);
     for (let i = 0; i < totalSamples; i++)
         fullPcm[i] = Math.max(-32768, Math.min(32767, Math.round(ch[i] * 32767)));
-    // Decimate: take every strideK-th sample — 1D NN downscaling
+    // Decimate without clamping: container is padded so i*strideK is always in-bounds
     const decimated = new Int16Array(AUDIO_LOWRES_SAMPLES);
     for (let i = 0; i < AUDIO_LOWRES_SAMPLES; i++)
-        decimated[i] = fullPcm[Math.min(i * strideK, totalSamples - 1)];
+        decimated[i] = fullPcm[i * strideK];
     const hashBuf = await crypto.subtle.digest("SHA-256", decimated.buffer);
     const hash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
     return { hash, strideK, totalSamples, sampleRate };
@@ -649,6 +842,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setVideoSize(null);
         setVideoFps(null);
         setVideoClipFrames(null);
+        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null);
     };
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
@@ -697,6 +891,11 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [cropBoxY, setCropBoxY] = useState(0);
     const cropImgRef = useRef<HTMLImageElement>(null);
     const cropDragStart = useRef<{ mx: number; my: number; bx: number; by: number } | null>(null);
+    // desc V3 fields: d = SHA256(T‖Q‖D), dim hex, thumb/quality base64
+    const [descD, setDescD] = useState<string | null>(null);
+    const [descDim, setDescDim] = useState<string | null>(null);
+    const [descThumb, setDescThumb] = useState<string | null>(null);
+    const [descQuality, setDescQuality] = useState<string | null>(null);
     // Video fields
     const [videoThumbDataUrl, setVideoThumbDataUrl] = useState<string | null>(null);
     const [videoThumbHash, setVideoThumbHash] = useState<string | null>(null);
@@ -729,7 +928,6 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     }, [videoClipDataUrl]);
 
     const imageInputRef = useRef<HTMLInputElement>(null);
-    const ethChfRate = useEthChfRate();
     const { showToast } = useToast();
 
     const isElectron = typeof window !== "undefined" && !!window.electronAPI;
@@ -842,6 +1040,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setCropY(null);
         setCropBoxX(0);
         setCropBoxY(0);
+        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null);
 
         if (algo === "default") {
             setIsAnalyzing(false);
@@ -889,28 +1088,17 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                         reader.readAsDataURL(blob);
                     });
                     setPreviewDataUrl(previewUrl);
+
+                    // desc V3 for extended_image (lowres only) — crop variant deferred to applyCrop
+                    if (algo === "extended_image") {
+                        const qBytes = computeElaLightFullRes(bmpBytes, width, height);
+                        const dim = new Uint8Array([...beU32(width), ...beU32(height)]);
+                        const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([thumbBytes], qBytes, dim);
+                        setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+                    }
                 }
 
                 // For crop algorithms: crop selection is done interactively via the UI after file load.
-            } else {
-                // ZK: generate thumbnail + BRISQUE score
-                const { previewDataUrl: dataUrl, previewHash: hash, rgbaBytes, width, height } = await generateThumbnailAndHash(file);
-                setPreviewDataUrl(dataUrl);
-                setPreviewHash(hash);
-                const imageHex = Array.from(rgbaBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-                try {
-                    const res = await fetch("/api/zk/generate", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ image_hex: imageHex, width, height }),
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (typeof data.brisque === "number") setBrisqueValue(data.brisque);
-                    }
-                } catch (e: any) {
-                    console.warn("BRISQUE server call failed:", e?.message);
-                }
             }
         } catch (err: any) {
             showToast(`Image processing error: ${err.message}`, "error");
@@ -928,6 +1116,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setAudioSize(null);
         setAudioLowresUrl(null);
         setAudioLowresHash(null);
+        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null);
         try {
             const needsPreview = algo === "extended_audio" || algo === "extended_audio_both";
             const needsLowres  = algo === "extended_audio_lowres" || algo === "extended_audio_both";
@@ -942,6 +1131,15 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                 setAudioPreviewUrl(result.wavDataUrl);
                 setAudioPreviewHash(result.previewHash);
                 setAudioPreviewSr(result.sampleRate);
+
+                // desc V3 for extended_audio (crop variant)
+                if (algo === "extended_audio" || algo === "extended_audio_both") {
+                    // Q computed over full file (matches Python master), not just the 240k preview crop.
+                    const qBytes = computeSecondDiffQuality(result.fullPcmInt16, result.totalSamples);
+                    const dim = new Uint8Array([...beU32(durationSecs), ...beU32(originalSr), ...beU32(result.totalSamples)]);
+                    const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([result.pcmBytes], qBytes, dim);
+                    setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+                }
             }
             if (needsLowres) {
                 const lowresResult = await pcmDecimatedHash(file);
@@ -967,9 +1165,10 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             setAudioBitrate(bitrateKbps || null);
 
             // All variants: x = header(64B) || full mono Int16 PCM
-            // Container size = 64 + max(AUDIO_CROP_SAMPLES, actualSamples) × 2
-            // (at least AUDIO_CROP_SAMPLES so d_crop range is always defined)
-            const estimatedSamples = Math.max(AUDIO_CROP_SAMPLES, Math.round(durationSecs * originalSr));
+            // Container is padded so every GetByte gate is in-bounds (crop + lowres).
+            const actualSamplesEst = Math.max(1, Math.round(durationSecs * originalSr));
+            const strideKEst = Math.max(1, Math.ceil(actualSamplesEst / AUDIO_LOWRES_SAMPLES));
+            const estimatedSamples = Math.max(AUDIO_CROP_SAMPLES, (AUDIO_LOWRES_SAMPLES - 1) * strideKEst + 1, actualSamplesEst);
             setAudioSize(64 + estimatedSamples * 2);
         } catch (err: any) {
             showToast(`Audio processing error: ${err.message}`, "error");
@@ -1090,7 +1289,21 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setCropPreviewDataUrl(url);
         setCropX(nativeX);
         setCropY(nativeY);
-    }, [selectedFile, cropBoxX, cropBoxY]);
+
+        // Compute desc V3 for crop-based algorithms
+        if (algorithms === "extended_image_dual") {
+            const thumbBytesLr = computeThumbBytesFromBmp(bmpBytes, bmpWidth, bmpHeight);
+            const qBytes = computeElaLightFullRes(bmpBytes, bmpWidth, bmpHeight);
+            const dim = new Uint8Array([...beU32(bmpWidth), ...beU32(bmpHeight), ...beU32(nativeX), ...beU32(nativeY)]);
+            const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([thumbBytesLr, cropBytes], qBytes, dim);
+            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+        } else if (algorithms === "extended_image_crop") {
+            const qBytes = computeElaLightFullRes(bmpBytes, bmpWidth, bmpHeight);
+            const dim = new Uint8Array([...beU32(bmpWidth), ...beU32(bmpHeight), ...beU32(nativeX), ...beU32(nativeY)]);
+            const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([cropBytes], qBytes, dim);
+            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+        }
+    }, [selectedFile, cropBoxX, cropBoxY, algorithms]);
 
     const processVideoFile = useCallback(async (file: File, algo: string) => {
         setIsAnalyzing(true);
@@ -1118,6 +1331,10 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             // W,H ≥ 256 is required by the d_thumb circuit; long edge capped at ~480px.
             const { cW, cH } = canonicalVideoDims(origW, origH);
             const fps = CANONICAL_FPS;
+            // Detect original fps for metadata display; circuit uses CANONICAL_FPS throughout.
+            const origFps = await detectVideoFps(video);
+            // Reset to t=0 after the fps probe (detectVideoFps plays briefly from t=0).
+            await new Promise<void>(r => { video.onseeked = () => r(); video.currentTime = 0; });
             const needsThumb  = algo === "extended_video" || algo === "extended_video_both";
             const needsClip   = algo === "extended_video_clip" || algo === "extended_video_both";
             const clipSec     = Math.min(VIDEO_CLIP_SECONDS, dur);
@@ -1129,11 +1346,6 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             const ctx = canvas.getContext("2d")!;
 
             // ── Hash: top-left 256×256 of frame 0 at canonical resolution (circuit d_thumb) ──
-            if (video.readyState >= 2) {
-                // already at t=0
-            } else {
-                await new Promise<void>(r => { video.onseeked = () => r(); video.currentTime = 0; });
-            }
             ctx.drawImage(video, 0, 0, cW, cH);
             const thumbImgData = ctx.getImageData(0, 0, VIDEO_THUMB_W, VIDEO_THUMB_H);
             const thumbRgb = new Uint8Array(VIDEO_THUMB_W * VIDEO_THUMB_H * 3);
@@ -1147,9 +1359,10 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
 
             // ── Hash: first nClipFrames raw RGB24 frames at canonical resolution (circuit d_clip) ──
             let clipHash: string | null = null;
+            let clipBuf: Uint8Array | null = null;
             if (needsClip && nClipFrames > 0) {
                 const frameBytes = cW * cH * 3;
-                const clipBuf = new Uint8Array(nClipFrames * frameBytes);
+                clipBuf = new Uint8Array(nClipFrames * frameBytes);
                 for (let f = 0; f < nClipFrames; f++) {
                     await new Promise<void>(r => { video.onseeked = () => r(); video.currentTime = f / fps; });
                     ctx.drawImage(video, 0, 0, cW, cH);
@@ -1190,7 +1403,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
 
             // Store original resolution for display; circuit uses canonical dims derived at contract time.
             setVideoWidth(origW); setVideoHeight(origH); setVideoDuration(dur);
-            setVideoBitrate(bitrateKbps); setVideoSize(containerSize); setVideoFps(fps);
+            setVideoBitrate(bitrateKbps); setVideoSize(containerSize); setVideoFps(origFps);
             setVideoSr(sr); setVideoNSamp(nSamp);
 
             // ── Preview videos via WebCodecs ──────────────────────────────────
@@ -1211,6 +1424,47 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                 setAnalyzingMsg("Processing video…");
                 setVideoClipDataUrl(clipVideoUrl);
             }
+
+            // ── Video quality Q = Q_ela_video(K×65536 B) ‖ Q_audio(1024 B) ─────
+            // Q_ela_video: ELA-light 256×256 image of each of K=32 evenly-spaced
+            //   frames, stored as raw bytes — a silent ELA video.
+            //   t_i = (i + 0.5) * dur / K  for i = 0..K-1.
+            //   Frontend animates the K frames at 10 fps; a splice attack is
+            //   visible as frames with degraded ELA.
+            // Q_audio: second-difference energy profile of the audio track,
+            //   computed identically to the standalone audio case
+            //   (256 segments × uint32 BE = 1024 bytes).
+            // Circuit: K sample positions fully determined by dur (in D) and fixed
+            //   K; circuit verifies K ELA CONST blocks + 256 audio CONST blocks.
+            const K_FRAMES = 32;
+            const elaFrames = new Uint8Array(K_FRAMES * 65536);
+            for (let ki = 0; ki < K_FRAMES; ki++) {
+                const t = (ki + 0.5) * dur / K_FRAMES;
+                setAnalyzingMsg(`Computing ELA frame ${ki + 1}/${K_FRAMES}…`);
+                await new Promise<void>(r => { video.onseeked = () => r(); video.currentTime = t; });
+                ctx.drawImage(video, 0, 0, cW, cH);
+                const ela = computeElaLightFromRGBA(ctx.getImageData(0, 0, cW, cH).data, cW, cH);
+                elaFrames.set(ela, ki * 65536);
+            }
+
+            const qVideoBytes = new Uint8Array(K_FRAMES * 65536 + 1024);
+            qVideoBytes.set(elaFrames, 0);
+            if (audioBuffer) {
+                const ch0 = audioBuffer.getChannelData(0);
+                const pcmI16 = new Int16Array(ch0.length);
+                for (let i = 0; i < ch0.length; i++)
+                    pcmI16[i] = Math.max(-32768, Math.min(32767, Math.round(ch0[i] * 32767)));
+                const qAudio = computeSecondDiffQuality(pcmI16, pcmI16.length);
+                qVideoBytes.set(qAudio, K_FRAMES * 65536);
+            }
+            // ── Desc V3: d = SHA256(T ‖ Q ‖ D) ──────────────────────────────────
+            // D encodes the canonical parameters the circuit uses: cW, cH, dur, sr, nSamp
+            const dimBytes = new Uint8Array([...beU32(cW), ...beU32(cH), ...beU32(dur), ...beU32(sr), ...beU32(nSamp)]);
+            const thumbParts: Uint8Array[] = [];
+            if (needsThumb) thumbParts.push(thumbRgb);
+            if (needsClip && clipBuf) thumbParts.push(clipBuf);
+            const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3(thumbParts, qVideoBytes, dimBytes);
+            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
 
             URL.revokeObjectURL(objectUrl);
         } catch (e: any) {
@@ -1242,10 +1496,6 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         }
         if (listingType === "image" && (algorithms === "extended_image_crop" || algorithms === "extended_image_dual") && !cropHash) {
             showToast("Please apply a crop region before posting", "warning");
-            return;
-        }
-        if (listingType === "image" && algorithms === "zk" && !previewDataUrl) {
-            showToast("Please select an image file", "warning");
             return;
         }
         if (listingType === "audio" && (algorithms === "extended_audio" || algorithms === "extended_audio_both") && !audioPreviewUrl) {
@@ -1341,6 +1591,14 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                 }
             }
 
+            // desc V3: include if available for any media type
+            if (descD) {
+                body.desc_d = descD;
+                body.desc_dim = descDim;
+                body.desc_thumb = descThumb;
+                body.desc_quality = descQuality;
+            }
+
             const res = await fetch("/api/listings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1350,16 +1608,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Failed to create listing");
 
-            // If ZK algorithm selected, kick off background proof generation (Electron only)
-            if (algorithms === "zk" && imageFilePath && window.electronAPI?.generateZkProofForListing) {
-                const listingId = Number(data.id);
-                // Fire-and-forget — the main process will PATCH the listing when done
-                window.electronAPI.generateZkProofForListing({ listingId, filePath: imageFilePath })
-                    .catch(() => {/* background — errors are non-blocking */});
-                showToast("Listing posted. ZK proof is generating in the background.", "success", 6000);
-            } else {
-                showToast("Listing posted successfully.", "success");
-            }
+            showToast("Listing posted successfully.", "success");
 
             window.dispatchEvent(new Event("reloadData"));
             onClose();
@@ -1369,15 +1618,6 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             setIsSubmitting(false);
         }
     };
-
-    const brisqueBadgeColor =
-        brisqueValue === null
-            ? "bg-gray-200 text-gray-600"
-            : brisqueValue < 30
-            ? "bg-green-200 text-green-800"
-            : brisqueValue < 60
-            ? "bg-yellow-200 text-yellow-800"
-            : "bg-red-200 text-red-800";
 
     return (
         <Modal title="Post New Listing" onClose={onClose}>
@@ -1457,17 +1697,12 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                             </p>
                         )}
                         {isAnalyzing && (
-                            <p className="mt-2 text-xs text-blue-600">
-                                {algorithms === "extended_image" ? "Computing dimensions and thumbnail hash…" : "Computing thumbnail hash and BRISQUE…"}
-                            </p>
+                            <p className="mt-2 text-xs text-blue-600">Computing dimensions and thumbnail hash…</p>
                         )}
                         {(algorithms === "extended_image_crop" || algorithms === "extended_image_dual") && !previewDataUrl && !isAnalyzing && selectedFile && (
                             <p className="mt-1 text-xs text-blue-600">
                                 Image loaded. Drag the blue box below to select the crop region, then click <strong>Apply Crop</strong>.
                             </p>
-                        )}
-                        {algorithms === "zk" && previewDataUrl && !isAnalyzing && (
-                            <p className="mt-2 text-xs text-orange-600">ZK proof will be generated in the background after posting (~1 hour). The listing will appear in the marketplace once the proof is ready.</p>
                         )}
                         {previewDataUrl && (
                             <div className="mt-3 flex items-start gap-3">
@@ -1497,24 +1732,11 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                                             Hash: {previewHash.slice(0, 16)}…
                                         </p>
                                     )}
-                                    {algorithms === "extended_image" ? (
+                                    {algorithms === "extended_image" && (
                                         <>
                                             {extImgWidth != null && <p>Width: {extImgWidth} px</p>}
                                             {extImgHeight != null && <p>Height: {extImgHeight} px</p>}
                                             {extImgSize != null && <p>Size: {extImgSize.toLocaleString()} B</p>}
-                                        </>
-                                    ) : (
-                                        <>
-                                            {brisqueValue !== null && (
-                                                <span className={`inline-block px-2 py-0.5 rounded text-xs ${brisqueBadgeColor}`}>
-                                                    BRISQUE: {brisqueValue.toFixed(1)}
-                                                </span>
-                                            )}
-                                            {brisqueValue === null && !isAnalyzing && (
-                                                <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-xs">
-                                                    BRISQUE unavailable
-                                                </span>
-                                            )}
                                         </>
                                     )}
                                 </div>
@@ -1711,27 +1933,18 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     <FormTextField id="listing-price" type="number" value={price} onChange={setPrice}>
                         Price (ETH)
                     </FormTextField>
-                    {ethToCHF(price, ethChfRate) && (
-                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(price, ethChfRate)} CHF</p>
-                    )}
                 </div>
 
                 <div>
                     <FormTextField id="listing-tip-completion" type="number" value={tipCompletion} onChange={setTipCompletion}>
                         Tip for completion (ETH)
                     </FormTextField>
-                    {ethToCHF(tipCompletion, ethChfRate) && (
-                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(tipCompletion, ethChfRate)} CHF</p>
-                    )}
                 </div>
 
                 <div>
                     <FormTextField id="listing-tip-dispute" type="number" value={tipDispute} onChange={setTipDispute}>
                         Tip for dispute (ETH)
                     </FormTextField>
-                    {ethToCHF(tipDispute, ethChfRate) && (
-                        <p className="text-xs text-gray-400 mt-1">≈ {ethToCHF(tipDispute, ethChfRate)} CHF</p>
-                    )}
                 </div>
 
                 <FormTextField id="listing-timeout" type="number" value={timeoutDelay} onChange={setTimeoutDelay}>
@@ -1743,7 +1956,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     value={algorithms}
                     onChange={handleAlgorithmChange}
                     options={
-                        listingType === "image" ? ["default", "extended_image", "extended_image_crop", "extended_image_dual", "zk"] :
+                        listingType === "image" ? ["default", "extended_image", "extended_image_crop", "extended_image_dual"] :
                         listingType === "audio" ? ["extended_audio", "extended_audio_lowres", "extended_audio_both"] :
                         listingType === "video" ? ["extended_video", "extended_video_clip", "extended_video_both"] :
                         ["default"]
@@ -1759,7 +1972,6 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                         extended_video: "Thumbnail (256×256, frame 0)",
                         extended_video_clip: "Clip (first 3s raw frames)",
                         extended_video_both: "Thumbnail + Clip (both)",
-                        zk: "ZK Proof (SP1, ~1h)",
                     }}
                     disabled={listingType === "general"}
                 >

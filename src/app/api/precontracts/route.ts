@@ -156,6 +156,16 @@ export async function GET(req: NextRequest) {
                 `).get(c.id) as any | undefined;
                 if (listing) return { ...c, ...listing };
             }
+            if (!c.desc_d) {
+                const listing = db.prepare(`
+                    SELECT l.desc_d, l.desc_dim, l.desc_thumb, l.desc_quality
+                    FROM purchase_requests pr
+                    JOIN listings l ON l.id = pr.listing_id
+                    WHERE pr.contract_id = ? LIMIT 1
+                `).get(c.id) as { desc_d: string | null; desc_dim: string | null; desc_thumb: string | null; desc_quality: string | null } | undefined;
+                if (listing?.desc_d) return { ...c, desc_d: listing.desc_d, desc_dim: listing.desc_dim, desc_thumb: listing.desc_thumb, desc_quality: listing.desc_quality };
+                if (listing?.desc_quality) return { ...c, desc_quality: listing.desc_quality };
+            }
             return c;
         });
 
@@ -283,7 +293,7 @@ export async function PUT(req: Request) {
             }
             
             contractData = {
-                item_description: preOut.description_hex || data.item_description || "",
+                item_description: preOut.desc_hex || preOut.description_hex || data.item_description || "",
                 opening_value: preOut.commitment_o_hex || preOut.opening_value || "",
                 pk_buyer: data.pk_buyer,
                 pk_vendor: data.pk_vendor,
@@ -339,6 +349,10 @@ export async function PUT(req: Request) {
                 ext_video_clip_frames: data.ext_video_clip_frames ?? null,
                 preview_video_clip: data.preview_video_clip || null,
                 ext_video_clip_hash: data.ext_video_clip_hash || null,
+                desc_d: data.desc_d || preOut.desc_hex || null,
+                desc_dim: data.desc_dim || preOut.dim_hex || null,
+                desc_thumb: data.desc_thumb || null,
+                desc_quality: data.desc_quality || null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -366,7 +380,8 @@ export async function PUT(req: Request) {
                 ext_audio_preview_sr, ext_audio_lowres_sr,
                 preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
                 ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
-                ext_video_clip_frames, preview_video_clip, ext_video_clip_hash
+                ext_video_clip_frames, preview_video_clip, ext_video_clip_hash,
+                desc_d, desc_dim, desc_thumb, desc_quality
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
@@ -382,7 +397,8 @@ export async function PUT(req: Request) {
                 ?, ?,
                 ?, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -439,6 +455,10 @@ export async function PUT(req: Request) {
                 contractData.ext_video_clip_frames,
                 contractData.preview_video_clip,
                 contractData.ext_video_clip_hash,
+                contractData.desc_d,
+                contractData.desc_dim,
+                contractData.desc_thumb,
+                contractData.desc_quality,
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);

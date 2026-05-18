@@ -2,7 +2,6 @@
 
 import Button from "../common/Button";
 import { useEffect, useState } from "react";
-import ChfNote from "../common/ChfNote";
 import { useToast } from "@/app/lib/ToastContext";
 
 type Contract = {
@@ -88,7 +87,7 @@ export default function UnsponsoredContractsListView({
                             >
                                 <td className="p-2 w-1/3">{c.id}</td>
                                 <td className="p-2 w-1/3">
-                                    {c.tip_completion} ETH<ChfNote value={c.tip_completion} />
+                                    {c.tip_completion} ETH
                                 </td>
                                 <td className="p-2 w-1/3 text-center">
                                     <Button

@@ -3456,7 +3456,7 @@ mod tests {
         for (i, gate) in gates.iter().enumerate() {
             let encoded = gate.encode();
             let hash = hash_block64(&encoded);
-            
+
             println!("Gate {}:", i + 1);
             println!("  Opcode: 0x{:02x}", gate.opcode);
             println!("  Sons: {:?}", gate.sons);
@@ -3466,4 +3466,293 @@ mod tests {
         }
     }
 
+}
+
+// ####################################
+// ###   CIRCUITS V3 — single-hash  ###
+// ####################################
+//
+// These circuits verify desc(Dec_k(ct)) = d where d = SHA256(T ‖ Q ‖ D).
+// T is computed from the decrypted BMP via GETBYTE+XOR-tree gates.
+// Q is embedded as CONST gates (committed to d through h_circuit).
+// D is embedded in the final SHA256 padding block (also CONST).
+
+/// Description parameters for the extended_image_dual V3 circuit.
+pub struct ImageDualDescV3 {
+    pub d: [u8; 32],       // SHA256(T_lr ‖ T_cr ‖ Q ‖ D)
+    pub q_bytes: Vec<u8>,  // 65536B ELA-light quality map
+    pub d_width: u32,
+    pub d_height: u32,
+    pub crop_x: u32,
+    pub crop_y: u32,
+}
+
+/// Description parameters for the extended_audio V3 circuit.
+pub struct AudioDescV3 {
+    pub d: [u8; 32],       // SHA256(T ‖ Q ‖ D)
+    pub q_bytes: Vec<u8>,  // 1024B RMS energy profile
+    pub d_dur: u32,
+    pub d_sr: u32,
+    pub d_n_samp: u32,
+}
+
+// ── V3 SHA helper: SHA256(T_lr ‖ T_cr ‖ Q ‖ D) ───────────────────────────────
+
+/// Build SHA256(T_lr ‖ T_cr ‖ Q ‖ D) in-circuit.
+///
+/// T_lr and T_cr are 196608-byte pixel regions (3072 block-gate indices each).
+/// Q is 65536 bytes pushed as 1024 CONST blocks.
+/// D is 16 bytes embedded in the final padded block.
+/// Total: 393216 + 65536 + 16 = 458768 bytes → 7169 SHA2 calls.
+fn sha_desc_dual_image(
+    gates: &mut Vec<GateV2>,
+    t_lr_blocks: &[usize],
+    t_cr_blocks: &[usize],
+    q_bytes: &[u8],
+    d_bytes: &[u8],
+) -> i64 {
+    debug_assert_eq!(t_lr_blocks.len(), 3072);
+    debug_assert_eq!(t_cr_blocks.len(), 3072);
+    debug_assert_eq!(q_bytes.len(), 65536);
+    debug_assert_eq!(d_bytes.len(), 16);
+
+    // Push Q as 1024 × 64B CONST blocks (2 gates each).
+    let mut q_block_gates: Vec<usize> = Vec::with_capacity(1024);
+    for chunk in q_bytes.chunks_exact(64) {
+        let g = push_const2(gates, chunk);
+        q_block_gates.push((g - 1) as usize);
+    }
+
+    // Final padded block: D (16B) ‖ 0x80 ‖ zeros(39B) ‖ len_bits_be_u64(8B)
+    // Total bytes = 393216 + 65536 + 16 = 458768 → len_bits = 458768 × 8 = 3670144
+    let len_bits: u64 = 458_768u64 * 8;
+    let mut final_block = vec![0u8; 64];
+    final_block[..16].copy_from_slice(d_bytes);
+    final_block[16] = 0x80;
+    final_block[56..].copy_from_slice(&len_bits.to_be_bytes());
+    let final_g = push_const2(gates, &final_block);
+    let final_gate = (final_g - 1) as usize;
+
+    let mut all_blocks: Vec<usize> = Vec::with_capacity(7169);
+    all_blocks.extend_from_slice(t_lr_blocks);
+    all_blocks.extend_from_slice(t_cr_blocks);
+    all_blocks.extend_from_slice(&q_block_gates);
+    all_blocks.push(final_gate);
+
+    sha_chain(gates, &all_blocks)
+}
+
+/// Build SHA256(T ‖ Q ‖ D) for audio.
+///
+/// T is 480000 bytes = 7500 × 64B blocks (direct AES-decrypted blocks [1..7501]).
+/// Q is 1024 bytes = 16 × 64B CONST blocks.
+/// D is 12 bytes embedded in the final padded block.
+/// Total: 480000 + 1024 + 12 = 481036 bytes → 7517 SHA2 calls.
+fn sha_desc_audio(
+    gates: &mut Vec<GateV2>,
+    t_block_gates: &[usize],
+    q_bytes: &[u8],
+    d_bytes: &[u8],
+) -> i64 {
+    debug_assert_eq!(t_block_gates.len(), 7500);
+    debug_assert_eq!(q_bytes.len(), 1024);
+    debug_assert_eq!(d_bytes.len(), 12);
+
+    // Q: 16 × 64B CONST blocks.
+    let mut q_block_gates: Vec<usize> = Vec::with_capacity(16);
+    for chunk in q_bytes.chunks_exact(64) {
+        let g = push_const2(gates, chunk);
+        q_block_gates.push((g - 1) as usize);
+    }
+
+    // Final padded block: D (12B) ‖ 0x80 ‖ zeros(43B) ‖ len_bits_be_u64(8B)
+    // 481036 mod 64 = 12 → 12 ≤ 55, padding fits in same block.
+    let len_bits: u64 = 481_036u64 * 8;
+    let mut final_block = vec![0u8; 64];
+    final_block[..12].copy_from_slice(d_bytes);
+    final_block[12] = 0x80;
+    final_block[56..].copy_from_slice(&len_bits.to_be_bytes());
+    let final_g = push_const2(gates, &final_block);
+    let final_gate = (final_g - 1) as usize;
+
+    let mut all_blocks: Vec<usize> = Vec::with_capacity(7517);
+    all_blocks.extend_from_slice(t_block_gates);
+    all_blocks.extend_from_slice(&q_block_gates);
+    all_blocks.push(final_gate);
+
+    sha_chain(gates, &all_blocks)
+}
+
+// ── compile_circuit_image_dual_desc_v3 ───────────────────────────────────────
+
+/// Compile the V3 circuit for extended_image_dual.
+///
+/// Verifies: SHA256(T_lr ‖ T_cr ‖ Q ‖ D) = d
+///   Phase 1: AES-CTR decrypt ct → x̂ blocks
+///   Phase 2: GETBYTE+XOR-tree → T_lr (lowres 256×256)
+///   Phase 3: GETBYTE+XOR-tree → T_cr (crop 256×256 at (crop_x, crop_y))
+///   Phase 4: CONST blocks for Q (ELA-light, embedded in circuit)
+///   Phase 5: SHA2 chain over T_lr ‖ T_cr ‖ Q ‖ D → compare to d
+///   Phase 6: CMPOFF header checks (w, h in SOX container header)
+pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> CompiledCircuitV2 {
+    if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
+    let iv = &ct[..16];
+    let data = &ct[16..];
+    let block_size = 64usize;
+    let pt_len = data.len();
+    let m = (pt_len + block_size - 1) / block_size;
+
+    let img_w = desc.d_width as usize;
+    let img_h = desc.d_height as usize;
+    let row_stride = (img_w * 3 + 3) / 4 * 4;
+
+    let min_size = BMP_PIXELS_START_IN_X + img_h * row_stride;
+    if pt_len < min_size {
+        die(&format!("Container too small: {} bytes, need ≥ {} for {}×{} BMP", pt_len, min_size, img_w, img_h));
+    }
+    if desc.q_bytes.len() != 65536 {
+        die("Q must be 65536 bytes (ELA-light quality map)");
+    }
+
+    let mut gates: Vec<GateV2> = Vec::new();
+    let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
+
+    // Phase 1: AES-CTR decryption.
+    for i in 0..m {
+        let counter = increment_iv(iv, (i * (block_size / 16)) as u64);
+        let remaining_bits = usize::min(512, (pt_len.saturating_sub(i * block_size)) * 8);
+        let mut params = Vec::with_capacity(18);
+        params.extend_from_slice(&counter);
+        params.extend_from_slice(&(remaining_bits as u16).to_be_bytes());
+        gates.push(GateV2 { opcode: OPCODE_AES_CTR, sons: vec![-(i as i64 + 1)], params });
+        block_outputs.push(gates.len() - 1);
+    }
+
+    // Phase 2: T_lr — lowres nearest-neighbour thumbnail.
+    let t_lr_blocks = emit_pixel_region_gates(
+        &mut gates,
+        &block_outputs,
+        256, 256,
+        img_h, row_stride,
+        |ox, oy| (ox * img_w / 256, oy * img_h / 256),
+    );
+
+    // Phase 3: T_cr — full-resolution crop.
+    let crop_x = desc.crop_x as usize;
+    let crop_y = desc.crop_y as usize;
+    let t_cr_blocks = emit_pixel_region_gates(
+        &mut gates,
+        &block_outputs,
+        256, 256,
+        img_h, row_stride,
+        |ox, oy| (crop_x + ox, crop_y + oy),
+    );
+
+    // Phase 4+5: SHA256(T_lr ‖ T_cr ‖ Q ‖ D), Q as CONST.
+    let d_bytes: Vec<u8> = [
+        desc.d_width.to_be_bytes(),
+        desc.d_height.to_be_bytes(),
+        desc.crop_x.to_be_bytes(),
+        desc.crop_y.to_be_bytes(),
+    ].concat();
+    let final_sha = sha_desc_dual_image(
+        &mut gates,
+        &t_lr_blocks,
+        &t_cr_blocks,
+        &desc.q_bytes,
+        &d_bytes,
+    );
+
+    // Compare SHA2 output to committed d.
+    let desc_gate = push_const1(&mut gates, &desc.d);
+    let comp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_COMP,
+        sons: vec![final_sha, desc_gate],
+        params: vec![],
+    });
+
+    // Phase 6: CMPOFF checks on SOX container header (block 0).
+    let hdr = (block_outputs[0] + 1) as i64;
+    let mut p_w = vec![0u8, 5, 4]; p_w.extend_from_slice(&desc.d_width.to_be_bytes());
+    let width_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_w });
+    let mut p_h = vec![0u8, 9, 4]; p_h.extend_from_slice(&desc.d_height.to_be_bytes());
+    let hgt_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_h });
+
+    let a1 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![comp_gate, width_gate], params: vec![] });
+    push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![a1, hgt_gate], params: vec![] });
+
+    CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 }
+}
+
+// ── compile_circuit_audio_desc_v3 ────────────────────────────────────────────
+
+/// Compile the V3 circuit for extended_audio.
+///
+/// Verifies: SHA256(T ‖ Q ‖ D) = d
+///   T = first 7500 AES-decrypted plaintext blocks (= 480000B of PCM after 64B header)
+///   Q = 1024B RMS profile as 16 CONST blocks
+///   D = dur ‖ sr ‖ n_samp (12B) in final padded block
+const AUDIO_V3_CROP_BLOCKS: usize = 7_500; // 480000 bytes / 64
+
+pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3) -> CompiledCircuitV2 {
+    if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
+    let iv = &ct[..16];
+    let data = &ct[16..];
+    let block_size = 64usize;
+    let pt_len = data.len();
+    let m = (pt_len + block_size - 1) / block_size;
+
+    if m < AUDIO_V3_CROP_BLOCKS + 1 {
+        die("Extended audio V3 requires at least 7501 blocks (1 header + 7500 crop)");
+    }
+    if desc.q_bytes.len() != 1024 {
+        die("Q must be 1024 bytes (RMS energy profile)");
+    }
+
+    let mut gates: Vec<GateV2> = Vec::new();
+    let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
+
+    // Phase 1: AES-CTR decryption.
+    for i in 0..m {
+        let counter = increment_iv(iv, (i * (block_size / 16)) as u64);
+        let remaining_bits = usize::min(512, (pt_len.saturating_sub(i * block_size)) * 8);
+        let mut params = Vec::with_capacity(18);
+        params.extend_from_slice(&counter);
+        params.extend_from_slice(&(remaining_bits as u16).to_be_bytes());
+        gates.push(GateV2 { opcode: OPCODE_AES_CTR, sons: vec![-(i as i64 + 1)], params });
+        block_outputs.push(gates.len() - 1);
+    }
+
+    // T = plaintext blocks 1..7501 (bytes 64..480064 = first 240k Int16 samples).
+    let t_block_gates: Vec<usize> = block_outputs[1..=AUDIO_V3_CROP_BLOCKS].to_vec();
+
+    // Phase 2+3: SHA256(T ‖ Q ‖ D), Q as CONST.
+    let d_bytes: Vec<u8> = [
+        desc.d_dur.to_be_bytes(),
+        desc.d_sr.to_be_bytes(),
+        desc.d_n_samp.to_be_bytes(),
+    ].concat();
+    let final_sha = sha_desc_audio(&mut gates, &t_block_gates, &desc.q_bytes, &d_bytes);
+
+    let desc_gate = push_const1(&mut gates, &desc.d);
+    let comp_gate = push_gate(&mut gates, GateV2 {
+        opcode: OPCODE_COMP,
+        sons: vec![final_sha, desc_gate],
+        params: vec![],
+    });
+
+    // Header CMPOFF checks (block 0): format, duration, sr, n_samp.
+    let hdr = (block_outputs[0] + 1) as i64;
+    let mut p_dur = vec![0u8, 5, 4]; p_dur.extend_from_slice(&desc.d_dur.to_be_bytes());
+    let dur_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_dur });
+    let mut p_sr = vec![0u8, 13, 4]; p_sr.extend_from_slice(&desc.d_sr.to_be_bytes());
+    let sr_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_sr });
+    let mut p_ns = vec![0u8, 17, 4]; p_ns.extend_from_slice(&desc.d_n_samp.to_be_bytes());
+    let ns_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_ns });
+
+    let a1 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![comp_gate, dur_gate], params: vec![] });
+    let a2 = push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![a1, sr_gate], params: vec![] });
+    push_gate(&mut gates, GateV2 { opcode: OPCODE_AND, sons: vec![a2, ns_gate], params: vec![] });
+
+    CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 }
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ChfNote from "../components/common/ChfNote";
 import { useUser } from "../lib/UserContext";
 import { useToast } from "../lib/ToastContext";
 import { ALL_PUBLIC_KEYS } from "../lib/blockchain/config";
@@ -48,6 +47,11 @@ type Listing = {
     ext_video_size?: number | null;
     ext_video_fps?: number | null;
     ext_video_clip_frames?: number | null;
+    // desc V3 fields: d = SHA256(T‖Q‖D)
+    desc_d?: string | null;
+    desc_dim?: string | null;
+    desc_thumb?: string | null;
+    desc_quality?: string | null;
 };
 
 type FilterType = "all" | "image" | "audio" | "video" | "general";
@@ -147,6 +151,142 @@ function dataUrlToObjectUrl(dataUrl: string): string {
     return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
+// Exact OpenCV COLORMAP_JET LUT (256 entries, RGB)
+const JET: readonly [number,number,number][] = [
+  [0,0,128],[0,0,132],[0,0,136],[0,0,140],[0,0,144],[0,0,148],[0,0,152],[0,0,156],
+  [0,0,160],[0,0,164],[0,0,168],[0,0,172],[0,0,176],[0,0,180],[0,0,184],[0,0,188],
+  [0,0,192],[0,0,196],[0,0,200],[0,0,204],[0,0,208],[0,0,212],[0,0,216],[0,0,220],
+  [0,0,224],[0,0,228],[0,0,232],[0,0,236],[0,0,240],[0,0,244],[0,0,248],[0,0,252],
+  [0,0,255],[0,4,255],[0,8,255],[0,12,255],[0,16,255],[0,20,255],[0,24,255],[0,28,255],
+  [0,32,255],[0,36,255],[0,40,255],[0,44,255],[0,48,255],[0,52,255],[0,56,255],[0,60,255],
+  [0,64,255],[0,68,255],[0,72,255],[0,76,255],[0,80,255],[0,84,255],[0,88,255],[0,92,255],
+  [0,96,255],[0,100,255],[0,104,255],[0,108,255],[0,112,255],[0,116,255],[0,120,255],[0,124,255],
+  [0,128,255],[0,132,255],[0,136,255],[0,140,255],[0,144,255],[0,148,255],[0,152,255],[0,156,255],
+  [0,160,255],[0,164,255],[0,168,255],[0,172,255],[0,176,255],[0,180,255],[0,184,255],[0,188,255],
+  [0,192,255],[0,196,255],[0,200,255],[0,204,255],[0,208,255],[0,212,255],[0,216,255],[0,220,255],
+  [0,224,255],[0,228,255],[0,232,255],[0,236,255],[0,240,255],[0,244,255],[0,248,255],[0,252,255],
+  [2,255,254],[6,255,250],[10,255,246],[14,255,242],[18,255,238],[22,255,234],[26,255,230],[30,255,226],
+  [34,255,222],[38,255,218],[42,255,214],[46,255,210],[50,255,206],[54,255,202],[58,255,198],[62,255,194],
+  [66,255,190],[70,255,186],[74,255,182],[78,255,178],[82,255,174],[86,255,170],[90,255,166],[94,255,162],
+  [98,255,158],[102,255,154],[106,255,150],[110,255,146],[114,255,142],[118,255,138],[122,255,134],[126,255,130],
+  [130,255,126],[134,255,122],[138,255,118],[142,255,114],[146,255,110],[150,255,106],[154,255,102],[158,255,98],
+  [162,255,94],[166,255,90],[170,255,86],[174,255,82],[178,255,78],[182,255,74],[186,255,70],[190,255,66],
+  [194,255,62],[198,255,58],[202,255,54],[206,255,50],[210,255,46],[214,255,42],[218,255,38],[222,255,34],
+  [226,255,30],[230,255,26],[234,255,22],[238,255,18],[242,255,14],[246,255,10],[250,255,6],[254,255,1],
+  [255,252,0],[255,248,0],[255,244,0],[255,240,0],[255,236,0],[255,232,0],[255,228,0],[255,224,0],
+  [255,220,0],[255,216,0],[255,212,0],[255,208,0],[255,204,0],[255,200,0],[255,196,0],[255,192,0],
+  [255,188,0],[255,184,0],[255,180,0],[255,176,0],[255,172,0],[255,168,0],[255,164,0],[255,160,0],
+  [255,156,0],[255,152,0],[255,148,0],[255,144,0],[255,140,0],[255,136,0],[255,132,0],[255,128,0],
+  [255,124,0],[255,120,0],[255,116,0],[255,112,0],[255,108,0],[255,104,0],[255,100,0],[255,96,0],
+  [255,92,0],[255,88,0],[255,84,0],[255,80,0],[255,76,0],[255,72,0],[255,68,0],[255,64,0],
+  [255,60,0],[255,56,0],[255,52,0],[255,48,0],[255,44,0],[255,40,0],[255,36,0],[255,32,0],
+  [255,28,0],[255,24,0],[255,20,0],[255,16,0],[255,12,0],[255,8,0],[255,4,0],[255,0,0],
+  [252,0,0],[248,0,0],[244,0,0],[240,0,0],[236,0,0],[232,0,0],[228,0,0],[224,0,0],
+  [220,0,0],[216,0,0],[212,0,0],[208,0,0],[204,0,0],[200,0,0],[196,0,0],[192,0,0],
+  [188,0,0],[184,0,0],[180,0,0],[176,0,0],[172,0,0],[168,0,0],[164,0,0],[160,0,0],
+  [156,0,0],[152,0,0],[148,0,0],[144,0,0],[140,0,0],[136,0,0],[132,0,0],[128,0,0],
+];
+
+function ElaVideoPlayer({ frames, audioBins, duration }: { frames: Uint8Array; audioBins: Uint32Array; duration: number }) {
+    const K = Math.floor(frames.length / 65536);
+    const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [barUrl,   setBarUrl]   = useState<string | null>(null);
+
+    useEffect(() => {
+        if (K === 0) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { Muxer, ArrayBufferTarget } = await import("webm-muxer");
+                if (cancelled) return;
+                const frameDurUs = Math.round(duration * 1_000_000 / K);
+                const target = new ArrayBufferTarget();
+                const muxer = new Muxer({
+                    target,
+                    video: { codec: "V_VP8", width: 256, height: 256, frameRate: 1 },
+                    type: "webm",
+                });
+                const videoEncoder = new VideoEncoder({
+                    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+                    error: (e) => console.error("ELA encode:", e),
+                });
+                videoEncoder.configure({ codec: "vp8", width: 256, height: 256, bitrate: 200_000, framerate: 1 });
+for (let ki = 0; ki < K; ki++) {
+                    if (cancelled) { videoEncoder.close(); return; }
+                    const f  = frames.subarray(ki * 65536, (ki + 1) * 65536);
+                    const id = new ImageData(256, 256);
+                    for (let i = 0; i < 65536; i++) {
+                        const [r, g, b] = JET[f[i]];
+                        id.data[i*4]=r; id.data[i*4+1]=g; id.data[i*4+2]=b; id.data[i*4+3]=255;
+                    }
+                    const bitmap = await createImageBitmap(id);
+                    const frame = new VideoFrame(bitmap, { timestamp: ki * frameDurUs, duration: frameDurUs, alpha: "discard" });
+                    videoEncoder.encode(frame, { keyFrame: true });
+                    frame.close();
+                    bitmap.close();
+                }
+                await videoEncoder.flush();
+                videoEncoder.close();
+                muxer.finalize();
+                if (cancelled) return;
+                const blob = new Blob([target.buffer], { type: "video/webm" });
+                setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
+            } catch (e) {
+                console.error("ELA video encoding failed:", e);
+            }
+        })();
+        return () => {
+            cancelled = true;
+            setVideoUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+        };
+    }, [frames, K, duration]);
+
+    useEffect(() => {
+        (async () => {
+            const oc  = new OffscreenCanvas(256, 64);
+            const ctx = oc.getContext("2d")!;
+            const id  = ctx.createImageData(256, 64);
+            for (let p = 0; p < 256 * 64; p++) {
+                id.data[p*4]=200; id.data[p*4+1]=200; id.data[p*4+2]=200; id.data[p*4+3]=255;
+            }
+            const mx = audioBins.reduce((a, b) => Math.max(a, b), 0);
+            if (mx > 0) {
+                for (let x = 0; x < 256; x++) {
+                    const h = Math.round(audioBins[x] / mx * 64);
+                    for (let y = 64 - h; y < 64; y++) {
+                        const p = y * 256 + x;
+                        id.data[p*4]=34; id.data[p*4+1]=197; id.data[p*4+2]=94; id.data[p*4+3]=255;
+                    }
+                }
+            }
+            ctx.putImageData(id, 0, 0);
+            const blob = await oc.convertToBlob({ type: "image/png" });
+            const url  = await new Promise<string>(res => {
+                const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(blob);
+            });
+            setBarUrl(url);
+        })();
+    }, [audioBins]);
+
+    return (
+        <div className="space-y-1">
+            {videoUrl
+                ? <video controls src={videoUrl} preload="auto"
+                        className="w-full rounded-lg border border-gray-100 bg-black"
+                        style={{ imageRendering: "pixelated" }} />
+                : <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center text-xs text-gray-400">
+                        Encoding ELA video…
+                  </div>
+            }
+            {barUrl && (
+                <img src={barUrl} alt="Audio second-difference quality"
+                    className="w-full rounded border border-gray-100"
+                    style={{ imageRendering: "pixelated" }} />
+            )}
+        </div>
+    );
+}
+
 function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLoggedIn }: DrawerProps) {
     const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
     const drawerRef = useRef<HTMLDivElement>(null);
@@ -186,6 +326,68 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
         setVideoClipSrc(url);
         return () => URL.revokeObjectURL(url);
     }, [listing.preview_video_clip]);
+
+    const [qualityDataUrl, setQualityDataUrl]       = useState<string | null>(null);
+    const [qualityVideoData, setQualityVideoData]   = useState<{ frames: Uint8Array; audioBins: Uint32Array; duration: number } | null>(null);
+    useEffect(() => {
+        if (!listing.desc_quality) { setQualityDataUrl(null); setQualityVideoData(null); return; }
+        let cancelled = false;
+        (async () => {
+            try {
+                const raw = atob(listing.desc_quality!);
+                const bytes = new Uint8Array(raw.length);
+                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+                // Video ELA quality: K×65536 raw ELA frames ‖ 1024 B audio second-diff
+                if (bytes.length > 65536 + 1024 && (bytes.length - 1024) % 65536 === 0) {
+                    const K = (bytes.length - 1024) / 65536;
+                    const frames = bytes.slice(0, K * 65536);
+                    const audioView = new DataView(bytes.buffer, bytes.byteOffset + K * 65536, 1024);
+                    const audioBins = new Uint32Array(256);
+                    for (let i = 0; i < 256; i++) audioBins[i] = audioView.getUint32(i * 4, false);
+                    const duration = listing.ext_video_duration ?? K / 10;
+                    if (!cancelled) { setQualityVideoData({ frames, audioBins, duration }); setQualityDataUrl(null); }
+                    return;
+                }
+
+                let canvas: OffscreenCanvas;
+                if (bytes.length === 65536) {
+                    canvas = new OffscreenCanvas(256, 256);
+                    const ctx = canvas.getContext("2d")!;
+                    const id = ctx.createImageData(256, 256);
+                    for (let i = 0; i < 65536; i++) {
+                        const [r, g, b] = JET[bytes[i]];
+                        id.data[i * 4] = r; id.data[i * 4 + 1] = g; id.data[i * 4 + 2] = b; id.data[i * 4 + 3] = 255;
+                    }
+                    ctx.putImageData(id, 0, 0);
+                } else if (bytes.length === 1024) {
+                    canvas = new OffscreenCanvas(256, 64);
+                    const ctx = canvas.getContext("2d")!;
+                    const view = new DataView(bytes.buffer);
+                    const rms = new Float32Array(256);
+                    let maxRms = 0;
+                    for (let i = 0; i < 256; i++) { rms[i] = view.getUint32(i * 4, false); if (rms[i] > maxRms) maxRms = rms[i]; }
+                    const id = ctx.createImageData(256, 64);
+                    for (let p = 0; p < 256 * 64; p++) { id.data[p*4]=200; id.data[p*4+1]=200; id.data[p*4+2]=200; id.data[p*4+3]=255; }
+                    if (maxRms > 0) {
+                        for (let x = 0; x < 256; x++) {
+                            const barH = Math.round((rms[x] / maxRms) * 64);
+                            for (let y = 64 - barH; y < 64; y++) {
+                                const p = y * 256 + x;
+                                id.data[p*4]=34; id.data[p*4+1]=197; id.data[p*4+2]=94; id.data[p*4+3]=255;
+                            }
+                        }
+                    }
+                    ctx.putImageData(id, 0, 0);
+                } else { return; }
+
+                const blob = await canvas.convertToBlob({ type: "image/png" });
+                const dataUrl = await new Promise<string>(res => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(blob); });
+                if (!cancelled) { setQualityDataUrl(dataUrl); setQualityVideoData(null); }
+            } catch { if (!cancelled) { setQualityDataUrl(null); setQualityVideoData(null); } }
+        })();
+        return () => { cancelled = true; };
+    }, [listing.desc_quality, listing.ext_video_duration]);
 
     // Close on Escape key
     useEffect(() => {
@@ -433,6 +635,37 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
                         </div>
                     )}
 
+                    {/* Quality fingerprint (desc V3) */}
+                    {qualityVideoData && (
+                        <div className="px-6 pt-5 pb-1">
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                                ELA video quality
+                            </p>
+                            <ElaVideoPlayer frames={qualityVideoData.frames} audioBins={qualityVideoData.audioBins} duration={qualityVideoData.duration} />
+                            <p className="text-xs text-gray-400 mt-1.5">
+                                ELA-light video (256×256, {Math.round(qualityVideoData.frames.length / 65536)} frames) + audio second-difference — committed via desc(x̂) = SHA256(T‖Q‖D)
+                            </p>
+                        </div>
+                    )}
+                    {qualityDataUrl && (
+                        <div className="px-6 pt-5 pb-1">
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                                {isAudio ? "RMS energy profile" : "ELA-light quality map"}
+                            </p>
+                            <img
+                                src={qualityDataUrl}
+                                alt="Quality map"
+                                className="w-full rounded-lg border border-gray-100"
+                                style={{ imageRendering: "pixelated" }}
+                            />
+                            <p className="text-xs text-gray-400 mt-1.5">
+                                {isAudio
+                                    ? "256-segment RMS energy of the audio — committed via desc(x̂) = SHA256(T‖Q‖D)"
+                                    : "Per-pixel Laplacian of luminance (ELA-light) — committed via desc(x̂) = SHA256(T‖Q‖D)"}
+                            </p>
+                        </div>
+                    )}
+
                     {/* Content */}
                     <div className="px-6 py-6 space-y-6">
                         {/* Title + quality */}
@@ -492,7 +725,6 @@ function ListingDrawer({ listing, onClose, onRequest, requesting, isOwn, isLogge
                     <div className="flex items-center justify-between gap-4">
                         <div>
                             <span className="text-2xl font-bold text-gray-900">{listing.price} ETH</span>
-                            <ChfNote value={listing.price} display="block" />
                         </div>
                         {isOwn ? (
                             <span className="text-sm text-gray-400 bg-gray-50 border border-gray-200 px-4 py-2 rounded-xl">
@@ -870,7 +1102,6 @@ export default function MarketplacePage() {
                                             </div>
                                             <div className="shrink-0 text-right">
                                                 <span className="text-sm font-bold text-gray-900">{listing.price} ETH</span>
-                                                <ChfNote value={listing.price} display="block" />
                                             </div>
                                         </div>
 

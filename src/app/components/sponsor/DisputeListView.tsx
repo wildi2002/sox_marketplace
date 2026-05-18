@@ -6,7 +6,6 @@ import Modal from "../common/Modal";
 import SponsorModal from "./SponsorModal";
 import DisputeSimulationModal from "./DisputeSimulationModal";
 import init, { check_argument, hex_to_bytes } from "@/app/lib/crypto_lib";
-import ChfNote from "../common/ChfNote";
 import { useToast } from "@/app/lib/ToastContext";
 import { useUser } from "@/app/lib/UserContext";
 import {
@@ -264,7 +263,7 @@ export default function DisputeListView() {
                             className="even:bg-gray-200 border-b border-black h-15"
                         >
                             <td className="p-2">{d.contract_id}</td>
-                            <td className="p-2">{d.tip_dispute} ETH<ChfNote value={d.tip_dispute} /></td>
+                            <td className="p-2">{d.tip_dispute} ETH</td>
                             <td className="p-2">
                                 {d.pk_buyer_sponsor ? (
                                     <span className="text-green-600 text-sm">✓ {d.pk_buyer_sponsor.slice(0, 10)}...</span>

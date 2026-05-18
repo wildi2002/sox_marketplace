@@ -32,7 +32,6 @@ import {
 } from "@/app/lib/blockchain/dispute";
 import { downloadFile, fileToBytes, openFile } from "@/app/lib/helpers";
 import { formatEther } from "ethers";
-import ChfNote from "../common/ChfNote";
 import init, {
     bytes_to_hex,
     check_received_ct_key,
@@ -1515,33 +1514,26 @@ export default function OngoingContractModal({
                         </div>
                         <div>
                             <strong>Item price:</strong> {Number(price)} ETH
-                            <ChfNote value={String(price)} />
                         </div>
                         <div>
                             <strong>Completion tip:</strong> {formatWei(completionTip)} ETH
-                            <ChfNote value={formatWei(completionTip)} />
                         </div>
                         <div>
                             <strong>Dispute tip:</strong> {formatWei(disputeTip)} ETH
-                            <ChfNote value={formatWei(disputeTip)} />
                         </div>
                         <div>
                             <strong>Sponsor deposit:</strong> {formatWei(sponsorDeposit)} ETH
-                            <ChfNote value={formatWei(sponsorDeposit)} />
                         </div>
                         <div>
                             <strong>Buyer deposit:</strong> {formatWei(buyerDeposit)} ETH
-                            <ChfNote value={formatWei(buyerDeposit)} />
                         </div>
                         <div>
                             <strong>Buyer dispute sponsor deposit:</strong>{" "}
                             {formatWei(bSponsorDeposit)} ETH
-                            <ChfNote value={formatWei(bSponsorDeposit)} />
                         </div>
                         <div>
                             <strong>Vendor dispute sponsor deposit:</strong>{" "}
                             {formatWei(vSponsorDeposit)} ETH
-                            <ChfNote value={formatWei(vSponsorDeposit)} />
                         </div>
                         {!!dispute_smart_contract && (
                             <>

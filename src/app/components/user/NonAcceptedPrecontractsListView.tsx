@@ -26,13 +26,6 @@ export type Contract = {
     listing_type?: string | null;
     preview_image?: string | null;
     preview_hash?: string | null;
-    brisque_value?: number | null;
-    zk_proof?: string | null;
-    zk_proof_full?: string | null;
-    zk_h_ct?: string | null;
-    zk_c_k?: string | null;
-    zk_thumbnail_hash?: string | null;
-    zk_brisque?: number | null;
     // Extended image description fields
     ext_img_thumb_hash?: string | null;
     ext_img_width?: number | null;
@@ -67,6 +60,11 @@ export type Contract = {
     ext_video_size?: number | null;
     ext_video_fps?: number | null;
     ext_video_clip_frames?: number | null;
+    // desc V3 fields: d = SHA256(T‖Q‖D)
+    desc_d?: string | null;
+    desc_dim?: string | null;
+    desc_thumb?: string | null;
+    desc_quality?: string | null;
 };
 
 interface NonAcceptedPrecontractsListViewProps {
@@ -135,12 +133,6 @@ export default function NonAcceptedPrecontractsListView({
                                         </span>
                                     ) : c.algorithm_suite === "extended_image" ? (
                                         <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-medium">Extended Desc</span>
-                                    ) : c.zk_proof_full ? (
-                                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">ZK Proof (SP1)</span>
-                                    ) : c.zk_proof ? (
-                                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">Hash Commitment</span>
-                                    ) : c.algorithm_suite === "zk" ? (
-                                        <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800 font-medium">ZK — no proof</span>
                                     ) : null}
                                 </td>
                                 <td className="p-2 text-center">

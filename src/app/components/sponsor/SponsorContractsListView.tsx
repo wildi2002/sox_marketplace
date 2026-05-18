@@ -4,7 +4,6 @@ import Button from "../common/Button";
 import { useEffect, useRef, useState } from "react";
 import SponsorModal from "./SponsorModal";
 import { deployOptimisticContract } from "../../lib/blockchain/optimistic";
-import ChfNote from "../common/ChfNote";
 import { useUser } from "@/app/lib/UserContext";
 import { useToast } from "@/app/lib/ToastContext";
 
@@ -127,7 +126,7 @@ export default function SponsorContractsListView() {
                             className="even:bg-gray-200 border-b border-black h-15"
                         >
                             <td className="p-2 w-1/5">{c.id}</td>
-                            <td className="p-2 w-1/5">{c.tip_completion} ETH<ChfNote value={c.tip_completion} /></td>
+                            <td className="p-2 w-1/5">{c.tip_completion} ETH</td>
                             <td className="p-2 w-1/5">{c.timeout_delay}</td>
                             <td className="p-2 w-1/5 text-center">
                                 <Button
