@@ -503,6 +503,8 @@ export function check_precontract_extended_image_crop_v2(description: Uint8Array
  * Q and D are embedded as CONST gates (committed through h_circuit).
  */
 export function compute_precontract_image_dual_v3(x_hat: Uint8Array, key: Uint8Array, w: number, h: number, cx: number, cy: number): PrecontractV3;
+export function bytes_to_hex(vec: Uint8Array): string;
+export function hex_to_bytes(hex_str: string): Uint8Array;
 /**
  * Creates a commitment for the given data by appending random bytes and hashing
  *
@@ -559,8 +561,18 @@ export function encrypt_block_js(data: Uint8Array[]): Uint8Array;
  * Decrypted bytes
  */
 export function decrypt_block_js(data: Uint8Array[]): Uint8Array;
-export function bytes_to_hex(vec: Uint8Array): string;
-export function hex_to_bytes(hex_str: string): Uint8Array;
+/**
+ * Compiles a basic circuit for processing ciphertext. Once the key is bound, the circuit computes
+ * the SHA256 hash of the initial plaintext and compares it to the provided description.
+ *
+ * # Arguments
+ * * `ct_size` - Size of the ciphertext (including IV!)
+ * * `description` - Description of the plaintext
+ *
+ * # Returns
+ * A `CompiledCircuit` configured for the given parameters
+ */
+export function compile_basic_circuit(ct_size: number, description: Uint8Array): CompiledCircuit;
 /**
  * JavaScript wrapper of the prove function
  *
@@ -592,18 +604,6 @@ export function prove_ext_js(values: Uint8Array[]): Array<any>;
  * Accumulated value as bytes
  */
 export function acc_js(values: Uint8Array[]): Uint8Array;
-/**
- * Compiles a basic circuit for processing ciphertext. Once the key is bound, the circuit computes
- * the SHA256 hash of the initial plaintext and compares it to the provided description.
- *
- * # Arguments
- * * `ct_size` - Size of the ciphertext (including IV!)
- * * `description` - Description of the plaintext
- *
- * # Returns
- * A `CompiledCircuit` configured for the given parameters
- */
-export function compile_basic_circuit(ct_size: number, description: Uint8Array): CompiledCircuit;
 /**
  * Result of checking a dispute argument.
  */
@@ -1006,254 +1006,3 @@ export class PrecontractV3 {
   num_blocks: number;
   num_gates: number;
 }
-
-export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
-
-export interface InitOutput {
-  readonly memory: WebAssembly.Memory;
-  readonly __wbg_argumentcheckresult_free: (a: number, b: number) => void;
-  readonly __wbg_checkctresult_free: (a: number, b: number) => void;
-  readonly __wbg_checkprecontractresult_free: (a: number, b: number) => void;
-  readonly __wbg_descresult_free: (a: number, b: number) => void;
-  readonly __wbg_disputeargument_free: (a: number, b: number) => void;
-  readonly __wbg_evaluatedcircuit_free: (a: number, b: number) => void;
-  readonly __wbg_evaluatedcircuitv2_free: (a: number, b: number) => void;
-  readonly __wbg_finalstepcomponents_free: (a: number, b: number) => void;
-  readonly __wbg_finalstepcomponentsv2_free: (a: number, b: number) => void;
-  readonly __wbg_get_argumentcheckresult_error: (a: number) => [number, number];
-  readonly __wbg_get_argumentcheckresult_is_valid: (a: number) => number;
-  readonly __wbg_get_argumentcheckresult_supports_buyer: (a: number) => number;
-  readonly __wbg_get_checkctresult_decrypted_file: (a: number) => [number, number];
-  readonly __wbg_get_checkprecontractresult_h_ct: (a: number) => [number, number];
-  readonly __wbg_get_checkprecontractresult_success: (a: number) => number;
-  readonly __wbg_get_descresult_dim: (a: number) => [number, number];
-  readonly __wbg_get_descresult_quality: (a: number) => [number, number];
-  readonly __wbg_get_disputeargument_circuit: (a: number) => number;
-  readonly __wbg_get_disputeargument_opening_value: (a: number) => [number, number];
-  readonly __wbg_get_finalstepcomponents_gate: (a: number) => [number, number];
-  readonly __wbg_get_finalstepcomponents_proof1: (a: number) => any;
-  readonly __wbg_get_finalstepcomponents_proof2: (a: number) => any;
-  readonly __wbg_get_finalstepcomponents_proof3: (a: number) => any;
-  readonly __wbg_get_finalstepcomponents_proof_ext: (a: number) => any;
-  readonly __wbg_get_finalstepcomponents_values: (a: number) => [number, number];
-  readonly __wbg_get_precontract_commitment: (a: number) => number;
-  readonly __wbg_get_precontract_num_blocks: (a: number) => number;
-  readonly __wbg_get_precontract_num_gates: (a: number) => number;
-  readonly __wbg_get_precontractv3_commitment: (a: number) => number;
-  readonly __wbg_get_precontractv3_dim: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_h_circuit: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_h_ct: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_num_blocks: (a: number) => number;
-  readonly __wbg_get_precontractv3_num_gates: (a: number) => number;
-  readonly __wbg_precontract_free: (a: number, b: number) => void;
-  readonly __wbg_precontractv3_free: (a: number, b: number) => void;
-  readonly __wbg_set_argumentcheckresult_error: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_argumentcheckresult_is_valid: (a: number, b: number) => void;
-  readonly __wbg_set_argumentcheckresult_supports_buyer: (a: number, b: number) => void;
-  readonly __wbg_set_checkctresult_decrypted_file: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_checkprecontractresult_h_ct: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_checkprecontractresult_success: (a: number, b: number) => void;
-  readonly __wbg_set_descresult_dim: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_descresult_quality: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_disputeargument_circuit: (a: number, b: number) => void;
-  readonly __wbg_set_disputeargument_opening_value: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_finalstepcomponents_gate: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_finalstepcomponents_proof1: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponents_proof2: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponents_proof3: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponents_proof_ext: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponents_values: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontract_commitment: (a: number, b: number) => void;
-  readonly __wbg_set_precontract_num_blocks: (a: number, b: number) => void;
-  readonly __wbg_set_precontract_num_gates: (a: number, b: number) => void;
-  readonly __wbg_set_precontractv3_commitment: (a: number, b: number) => void;
-  readonly __wbg_set_precontractv3_dim: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_h_circuit: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_h_ct: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_num_blocks: (a: number, b: number) => void;
-  readonly __wbg_set_precontractv3_num_gates: (a: number, b: number) => void;
-  readonly check_argument: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_audio_both_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_audio_lowres_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_audio_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_image_crop_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_image_dual_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_image_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_video_both_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_video_clip_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_extended_video_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_precontract_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly check_received_ct_audio_v3: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
-  readonly check_received_ct_image_dual_v3: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => number;
-  readonly check_received_ct_key: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_audio_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_audio_lowres_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_audio_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_image_crop_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_image_dual_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_image_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_video_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_video_clip_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly check_received_ct_key_extended_video_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number) => number;
-  readonly compile_circuit_extended_audio_both_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_audio_lowres_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_audio_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_image_crop_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_image_dual_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_image_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_video_both_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_video_clip_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_extended_video_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compile_circuit_v2_wasm: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly compute_audio_delta_quality: (a: number, b: number, c: number) => [number, number];
-  readonly compute_desc_audio: (a: number, b: number, c: number, d: number, e: number) => number;
-  readonly compute_desc_image_crop: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-  readonly compute_desc_image_dual: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-  readonly compute_desc_image_lowres: (a: number, b: number, c: number, d: number) => number;
-  readonly compute_precontract_audio_v3: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-  readonly compute_precontract_extended_audio_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => number;
-  readonly compute_precontract_extended_audio_lowres_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => number;
-  readonly compute_precontract_extended_audio_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => number;
-  readonly compute_precontract_extended_image_crop_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => number;
-  readonly compute_precontract_extended_image_dual_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => number;
-  readonly compute_precontract_extended_image_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => number;
-  readonly compute_precontract_extended_video_both_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => number;
-  readonly compute_precontract_extended_video_clip_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number) => number;
-  readonly compute_precontract_extended_video_v2: (a: number, b: number, c: any, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => number;
-  readonly compute_precontract_image_dual_v3: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly compute_precontract_values: (a: number, b: number, c: any, d: number, e: number) => number;
-  readonly compute_precontract_values_v2: (a: number, b: number, c: any, d: number, e: number) => number;
-  readonly compute_proof_right: (a: number, b: number, c: number, d: number) => any;
-  readonly compute_proof_right_v2: (a: number, b: number, c: number, d: number) => any;
-  readonly compute_proofs: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-  readonly compute_proofs_left: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-  readonly compute_proofs_left_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-  readonly compute_proofs_v2: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-  readonly disputeargument_from_bytes: (a: number, b: number) => number;
-  readonly disputeargument_to_bytes: (a: number) => [number, number];
-  readonly evaluate_circuit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly evaluate_circuit_v2_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-  readonly evaluatedcircuit_from_bytes: (a: number, b: number) => number;
-  readonly evaluatedcircuit_to_bytes: (a: number) => [number, number];
-  readonly evaluatedcircuitv2_from_bytes: (a: number, b: number) => number;
-  readonly evaluatedcircuitv2_to_bytes: (a: number) => [number, number];
-  readonly hpre: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly hpre_v2: (a: number, b: number, c: number, d: number) => [number, number];
-  readonly make_argument: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-  readonly verify_desc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-  readonly __wbg_set_finalstepcomponentsv2_proof1: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponentsv2_proof2: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponentsv2_proof3: (a: number, b: any) => void;
-  readonly __wbg_set_finalstepcomponentsv2_proof_ext: (a: number, b: any) => void;
-  readonly __wbg_set_checkctresult_success: (a: number, b: number) => void;
-  readonly __wbg_get_finalstepcomponentsv2_values: (a: number) => [number, number];
-  readonly __wbg_get_finalstepcomponentsv2_proof1: (a: number) => any;
-  readonly __wbg_get_finalstepcomponentsv2_proof2: (a: number) => any;
-  readonly __wbg_get_finalstepcomponentsv2_proof3: (a: number) => any;
-  readonly __wbg_get_finalstepcomponentsv2_proof_ext: (a: number) => any;
-  readonly __wbg_set_checkprecontractresult_h_circuit: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_descresult_d: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_descresult_thumb: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_disputeargument_ct: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_finalstepcomponents_curr_acc: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_finalstepcomponentsv2_curr_acc: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_finalstepcomponentsv2_gate_bytes: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontract_circuit_bytes: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontract_ct: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontract_description: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontract_h_circuit: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontract_h_ct: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_circuit_bytes: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_ct: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_d: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_quality: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_precontractv3_thumb: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_finalstepcomponentsv2_values: (a: number, b: number, c: number) => void;
-  readonly __wbg_get_checkctresult_success: (a: number) => number;
-  readonly __wbg_get_checkprecontractresult_h_circuit: (a: number) => [number, number];
-  readonly __wbg_get_descresult_d: (a: number) => [number, number];
-  readonly __wbg_get_descresult_thumb: (a: number) => [number, number];
-  readonly __wbg_get_disputeargument_ct: (a: number) => [number, number];
-  readonly __wbg_get_finalstepcomponents_curr_acc: (a: number) => [number, number];
-  readonly __wbg_get_finalstepcomponentsv2_curr_acc: (a: number) => [number, number];
-  readonly __wbg_get_finalstepcomponentsv2_gate_bytes: (a: number) => [number, number];
-  readonly __wbg_get_precontract_circuit_bytes: (a: number) => [number, number];
-  readonly __wbg_get_precontract_ct: (a: number) => [number, number];
-  readonly __wbg_get_precontract_description: (a: number) => [number, number];
-  readonly __wbg_get_precontract_h_circuit: (a: number) => [number, number];
-  readonly __wbg_get_precontract_h_ct: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_circuit_bytes: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_ct: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_d: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_quality: (a: number) => [number, number];
-  readonly __wbg_get_precontractv3_thumb: (a: number) => [number, number];
-  readonly __wbg_commitment_free: (a: number, b: number) => void;
-  readonly __wbg_get_commitment_c: (a: number) => [number, number];
-  readonly __wbg_get_commitment_o: (a: number) => [number, number];
-  readonly __wbg_set_commitment_c: (a: number, b: number, c: number) => void;
-  readonly __wbg_set_commitment_o: (a: number, b: number, c: number) => void;
-  readonly commit: (a: number, b: number) => number;
-  readonly decrypt_block_js: (a: number, b: number) => [number, number];
-  readonly sha256_compress_final_js: (a: number, b: number) => [number, number];
-  readonly sha256_compress_js: (a: number, b: number) => [number, number];
-  readonly encrypt_block_js: (a: number, b: number) => [number, number];
-  readonly bytes_to_hex: (a: number, b: number) => [number, number];
-  readonly hex_to_bytes: (a: number, b: number) => [number, number];
-  readonly acc_js: (a: number, b: number) => [number, number];
-  readonly prove_ext_js: (a: number, b: number) => any;
-  readonly prove_js: (a: number, b: number, c: any) => any;
-  readonly __wbg_compiledcircuit_free: (a: number, b: number) => void;
-  readonly __wbg_compiledcircuitwithconstants_free: (a: number, b: number) => void;
-  readonly __wbg_gate_free: (a: number, b: number) => void;
-  readonly __wbg_get_compiledcircuit_block_size: (a: number) => number;
-  readonly __wbg_get_compiledcircuit_num_blocks: (a: number) => number;
-  readonly __wbg_get_compiledcircuit_version: (a: number) => number;
-  readonly __wbg_get_gate_opcode: (a: number) => number;
-  readonly __wbg_get_gate_sons: (a: number) => [number, number];
-  readonly __wbg_set_compiledcircuit_block_size: (a: number, b: number) => void;
-  readonly __wbg_set_compiledcircuit_num_blocks: (a: number, b: number) => void;
-  readonly __wbg_set_compiledcircuit_version: (a: number, b: number) => void;
-  readonly __wbg_set_gate_opcode: (a: number, b: number) => void;
-  readonly __wbg_set_gate_sons: (a: number, b: number, c: number) => void;
-  readonly compile_basic_circuit: (a: number, b: number, c: number) => number;
-  readonly compiledcircuit_from_bytes: (a: number, b: number) => number;
-  readonly compiledcircuit_to_bytes: (a: number) => [number, number];
-  readonly gate_abi_encoded: (a: number) => [number, number];
-  readonly gate_dummy: () => number;
-  readonly gate_flatten: (a: number) => [number, number];
-  readonly gate_is_dummy: (a: number) => number;
-  readonly __wbg_set_compiledcircuitwithconstants_block_size: (a: number, b: number) => void;
-  readonly __wbg_set_compiledcircuitwithconstants_version: (a: number, b: number) => void;
-  readonly __wbg_get_compiledcircuitwithconstants_block_size: (a: number) => number;
-  readonly __wbg_get_compiledcircuitwithconstants_version: (a: number) => number;
-  readonly __wbindgen_exn_store: (a: number) => void;
-  readonly __externref_table_alloc: () => number;
-  readonly __wbindgen_export_2: WebAssembly.Table;
-  readonly __wbindgen_malloc: (a: number, b: number) => number;
-  readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-  readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-  readonly __externref_drop_slice: (a: number, b: number) => void;
-  readonly __wbindgen_start: () => void;
-}
-
-export type SyncInitInput = BufferSource | WebAssembly.Module;
-/**
-* Instantiates the given `module`, which can either be bytes or
-* a precompiled `WebAssembly.Module`.
-*
-* @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
-*
-* @returns {InitOutput}
-*/
-export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
-
-/**
-* If `module_or_path` is {RequestInfo} or {URL}, makes a request and
-* for everything else, calls `WebAssembly.instantiate` directly.
-*
-* @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
-*
-* @returns {Promise<InitOutput>}
-*/
-export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

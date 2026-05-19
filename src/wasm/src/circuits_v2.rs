@@ -801,7 +801,7 @@ pub struct ExtendedImageDesc {
 ///   6. Header bytes 9..13 = d_height (big-endian u32)
 ///
 /// Circuit size: ≈ 2m + 393 230 gates (dominated by 196 608 GETBYTE + 193 536 XOR + 3 073 SHA).
-pub fn compile_circuit_extended_image_v2(ct: &[u8], desc: &ExtendedImageDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_image_v2(ct: &[u8], desc: &ExtendedImageDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 {
         die("Ciphertext must include a 16-byte IV");
     }
@@ -817,13 +817,16 @@ pub fn compile_circuit_extended_image_v2(ct: &[u8], desc: &ExtendedImageDesc) ->
     let row_stride = (img_w * 3 + 3) / 4 * 4;
 
     // Minimum: header block + BMP file headers + at least one pixel row
+    // Skip size check when LZ4-compressed (IV bit-7 flag) — compressed CT is smaller than raw BMP
     let min_size = BMP_PIXELS_START_IN_X + img_h * row_stride;
-    if pt_len < min_size {
+    if iv[15] & 0x80 == 0 && pt_len < min_size {
         die(&format!(
             "Container too small: {} bytes, need ≥ {} for {}×{} BMP",
             pt_len, min_size, img_w, img_h
         ));
     }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -839,42 +842,21 @@ pub fn compile_circuit_extended_image_v2(ct: &[u8], desc: &ExtendedImageDesc) ->
         block_outputs.push(gates.len() - 1);
     }
 
-    // ── Phase 2: SHA256 of full plaintext ──────────────────────────────────────
-    let rem = pt_len % block_size;
-    let len_bits_full = (pt_len as u64) * 8;
-    let last_aes_gate_num = (*block_outputs.last().unwrap() + 1) as i64;
-    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
-    if rem == 0 {
-        let mut extra = vec![0u8; 64]; extra[0] = 0x80;
-        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        let h = push_const2(&mut gates, &extra);
-        full_sha_blocks.push((h - 1) as usize);
-    } else {
-        let pad_extra = rem > block_size - 9;
-        let mut mask = vec![0u8; 64]; mask[rem] = 0x80;
-        if !pad_extra { mask[56..].copy_from_slice(&len_bits_full.to_be_bytes()); }
-        let mg = push_const2(&mut gates, &mask);
-        let pg = push_gate(&mut gates, GateV2 { opcode: OPCODE_XOR, sons: vec![last_aes_gate_num, mg], params: vec![] });
-        *full_sha_blocks.last_mut().unwrap() = (pg - 1) as usize;
-        if pad_extra {
-            let mut extra = vec![0u8; 64]; extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-            let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-        }
+    // LZ4: both vendor (lz4_plain=Some) and buyer (lz4_plain=None) compile the same
+    // minimal circuit from the IV flag alone — no pixel extraction, only full SHA.
+    if iv[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 };
     }
-    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
-    let desc_sha_gate = push_const1(&mut gates, &desc.d_sha);
-    let sha_comp_gate = push_gate(&mut gates, GateV2 {
-        opcode: OPCODE_COMP, sons: vec![final_full_sha, desc_sha_gate], params: vec![],
-    });
+
+    // ── Phase 2: SHA256(decompress(ct)) ───────────────────────────────────────
+    let sha_comp_gate = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
 
     // ── Phase 3: Compute NN thumbnail from BMP pixels and verify SHA256 ───────
-    // Nearest-neighbour: output pixel (ox, oy) ← source pixel (ox*W/256, oy*H/256).
     let thumb_block_gates = emit_pixel_region_gates(
-        &mut gates,
-        &block_outputs,
-        256, 256,
-        img_h, row_stride,
+        &mut gates, &block_outputs, 256, 256, img_h, row_stride,
         |ox, oy| (ox * img_w / 256, oy * img_h / 256),
+        lz4_srcs.as_deref(),
     );
     let final_thumb_sha = sha_region_196608(&mut gates, &thumb_block_gates);
     let desc_thumb_gate = push_const1(&mut gates, &desc.d_thumb);
@@ -882,8 +864,8 @@ pub fn compile_circuit_extended_image_v2(ct: &[u8], desc: &ExtendedImageDesc) ->
         opcode: OPCODE_COMP, sons: vec![final_thumb_sha, desc_thumb_gate], params: vec![],
     });
 
-    // ── Phase 4: CMPOFF gates on header block (block 0) ───────────────────────
-    let hdr = (block_outputs[0] + 1) as i64;
+    // ── Phase 4: CMPOFF gates on decompressed header ──────────────────────────
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let fmt_gate   = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: vec![0,0,1,desc.d_format] });
     let mut p_sz   = vec![0u8,1,4]; p_sz.extend_from_slice(&desc.d_size.to_be_bytes());
     let sz_gate    = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_sz });
@@ -942,7 +924,7 @@ pub struct ExtendedAudioDesc {
 ///   6. Header bytes 9..13 = d_bitrate (big-endian u32)
 ///
 /// Circuit size: ≈ 2m + 7524 gates, where m = ⌈|ct data| / 64⌉.
-pub fn compile_circuit_extended_audio_v2(ct: &[u8], desc: &ExtendedAudioDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_audio_v2(ct: &[u8], desc: &ExtendedAudioDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 {
         die("Ciphertext must include a 16-byte IV");
     }
@@ -953,9 +935,11 @@ pub fn compile_circuit_extended_audio_v2(ct: &[u8], desc: &ExtendedAudioDesc) ->
     let pt_len = data.len();
     let m = (pt_len + block_size - 1) / block_size;
 
-    if m < AUDIO_CROP_BLOCKS + 1 {
+    if iv[15] & 0x80 == 0 && m < AUDIO_CROP_BLOCKS + 1 {
         die("Extended audio requires at least 7501 blocks (1 header + 7500 crop)");
     }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -967,79 +951,28 @@ pub fn compile_circuit_extended_audio_v2(ct: &[u8], desc: &ExtendedAudioDesc) ->
         let mut params = Vec::with_capacity(18);
         params.extend_from_slice(&counter);
         params.extend_from_slice(&(remaining_bits as u16).to_be_bytes());
-        gates.push(GateV2 {
-            opcode: OPCODE_AES_CTR,
-            sons: vec![-(i as i64 + 1)],
-            params,
-        });
+        gates.push(GateV2 { opcode: OPCODE_AES_CTR, sons: vec![-(i as i64 + 1)], params });
         block_outputs.push(gates.len() - 1);
     }
 
-    // ── Phase 2: SHA256 of full plaintext ──────────────────────────────────────
-    let rem = pt_len % block_size;
-    let len_bits_full = (pt_len as u64) * 8;
-    let pad_extra_full = rem > block_size - 9;
-    let last_aes_gate_num = (*block_outputs.last().unwrap() + 1) as i64;
-
-    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
-
-    if rem == 0 {
-        let mut extra = vec![0u8; 64];
-        extra[0] = 0x80;
-        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        let h = push_const2(&mut gates, &extra);
-        full_sha_blocks.push((h - 1) as usize);
-    } else {
-        let mut mask = vec![0u8; 64];
-        mask[rem] = 0x80;
-        if !pad_extra_full {
-            mask[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        }
-        let mask_gate = push_const2(&mut gates, &mask);
-        let padded = push_gate(&mut gates, GateV2 {
-            opcode: OPCODE_XOR,
-            sons: vec![last_aes_gate_num, mask_gate],
-            params: vec![],
-        });
-        *full_sha_blocks.last_mut().unwrap() = (padded - 1) as usize;
-
-        if pad_extra_full {
-            let mut extra = vec![0u8; 64];
-            extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-            let h = push_const2(&mut gates, &extra);
-            full_sha_blocks.push((h - 1) as usize);
-        }
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if iv[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 };
     }
 
-    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
-    let desc_sha_gate = push_const1(&mut gates, &desc.d_sha);
-    let sha_comp_gate = push_gate(&mut gates, GateV2 {
-        opcode: OPCODE_COMP,
-        sons: vec![final_full_sha, desc_sha_gate],
-        params: vec![],
-    });
+    // ── Phase 2: SHA256(decompress(ct)) ───────────────────────────────────────
+    let sha_comp_gate = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
 
-    // ── Phase 3: SHA256 of crop (blocks 1..=7500, 480 000 bytes, block-range) ────
-    // d_crop = SHA256(x[64..480064]); 480000 % 64 = 0 → extra padding block required
-    let crop_len_bits: u64 = (AUDIO_CROP_BYTES as u64) * 8;
-    let mut crop_pad = vec![0u8; 64];
-    crop_pad[0] = 0x80;
-    crop_pad[56..].copy_from_slice(&crop_len_bits.to_be_bytes());
-    let crop_pad_gate = push_const2(&mut gates, &crop_pad);
+    // ── Phase 3: SHA256 of first AUDIO_CROP_BYTES of audio data ───────────────
+    let raw_crop_slice = if lz4_srcs.is_none() { &block_outputs[1..AUDIO_CROP_BLOCKS + 1] } else { &[] };
+    let preview_comp_gate = range_sha_comp_gate(
+        &mut gates, &block_outputs, lz4_srcs.as_deref(),
+        64, AUDIO_CROP_BYTES, raw_crop_slice, &desc.d_crop,
+    );
 
-    let mut crop_sha_blocks: Vec<usize> = block_outputs[1..AUDIO_CROP_BLOCKS + 1].to_vec();
-    crop_sha_blocks.push((crop_pad_gate - 1) as usize);
-
-    let final_crop_sha = sha_chain(&mut gates, &crop_sha_blocks);
-    let desc_crop_gate = push_const1(&mut gates, &desc.d_crop);
-    let preview_comp_gate = push_gate(&mut gates, GateV2 {
-        opcode: OPCODE_COMP,
-        sons: vec![final_crop_sha, desc_crop_gate],
-        params: vec![],
-    });
-
-    // ── Phase 4: CMPOFF gates on header block (block 0) ───────────────────────
-    let header_gate_num = (block_outputs[0] + 1) as i64;
+    // ── Phase 4: CMPOFF gates on decompressed header ──────────────────────────
+    let header_gate_num = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
 
     // format: 1 byte at offset 0, expected d_format
     let p_fmt = vec![0u8, 0u8, 1u8, desc.d_format];
@@ -1117,7 +1050,7 @@ pub struct ExtendedImageCropDesc {
 ///
 /// Verifies: SHA256(full) = d_sha, SHA256(native-res crop extracted from BMP) = d_crop,
 /// format tag = 0x02, size/width/height at header offsets 1/5/9.
-pub fn compile_circuit_extended_image_crop_v2(ct: &[u8], desc: &ExtendedImageCropDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_image_crop_v2(ct: &[u8], desc: &ExtendedImageCropDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
     let iv = &ct[..16];
     let data = &ct[16..];
@@ -1135,9 +1068,11 @@ pub fn compile_circuit_extended_image_crop_v2(ct: &[u8], desc: &ExtendedImageCro
         die("Crop region extends outside the image boundaries");
     }
     let min_size = BMP_PIXELS_START_IN_X + img_h * row_stride;
-    if pt_len < min_size {
+    if iv[15] & 0x80 == 0 && pt_len < min_size {
         die(&format!("Container too small for {}×{} BMP", img_w, img_h));
     }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -1152,43 +1087,27 @@ pub fn compile_circuit_extended_image_crop_v2(ct: &[u8], desc: &ExtendedImageCro
         block_outputs.push(gates.len() - 1);
     }
 
-    // Phase 2: SHA256(full)
-    let rem = pt_len % block_size;
-    let len_bits_full = (pt_len as u64) * 8;
-    let last_aes = (*block_outputs.last().unwrap() + 1) as i64;
-    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
-    if rem == 0 {
-        let mut extra = vec![0u8; 64]; extra[0] = 0x80;
-        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-    } else {
-        let pad_extra = rem > block_size - 9;
-        let mut mask = vec![0u8; 64]; mask[rem] = 0x80;
-        if !pad_extra { mask[56..].copy_from_slice(&len_bits_full.to_be_bytes()); }
-        let mg = push_const2(&mut gates, &mask);
-        let pg = push_gate(&mut gates, GateV2 { opcode: OPCODE_XOR, sons: vec![last_aes, mg], params: vec![] });
-        *full_sha_blocks.last_mut().unwrap() = (pg - 1) as usize;
-        if pad_extra {
-            let mut extra = vec![0u8; 64]; extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-            let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-        }
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if iv[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 };
     }
-    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
-    let dsha_gate = push_const1(&mut gates, &desc.d_sha);
-    let sha_comp_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_full_sha, dsha_gate], params: vec![] });
+
+    // Phase 2: SHA256(decompress(ct))
+    let sha_comp_gate = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
 
     // Phase 3: Extract 256×256 native-res crop at (crop_x, crop_y) and verify SHA256
     let crop_block_gates = emit_pixel_region_gates(
-        &mut gates, &block_outputs,
-        256, 256, img_h, row_stride,
+        &mut gates, &block_outputs, 256, 256, img_h, row_stride,
         |tx, ty| (crop_x + tx, crop_y + ty),
+        lz4_srcs.as_deref(),
     );
     let final_crop_sha = sha_region_196608(&mut gates, &crop_block_gates);
     let dcrop_gate = push_const1(&mut gates, &desc.d_crop);
     let crop_comp_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_crop_sha, dcrop_gate], params: vec![] });
 
-    // Phase 4: CMPOFF on header (block 0)
-    let hdr = (block_outputs[0] + 1) as i64;
+    // Phase 4: CMPOFF on decompressed header
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let fmt_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: vec![0,0,1,0x02] });
     let mut p_sz = vec![0u8,1,4]; p_sz.extend_from_slice(&desc.d_size.to_be_bytes());
     let sz_gate  = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_sz });
@@ -1233,7 +1152,7 @@ pub struct ExtendedImageDualDesc {
 ///
 /// Verifies: SHA256(full) = d_sha, SHA256(NN thumbnail) = d_thumb,
 /// SHA256(native-res crop at (crop_x,crop_y)) = d_crop, format = 0x03, size/width/height.
-pub fn compile_circuit_extended_image_dual_v2(ct: &[u8], desc: &ExtendedImageDualDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_image_dual_v2(ct: &[u8], desc: &ExtendedImageDualDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
     let iv = &ct[..16];
     let data = &ct[16..];
@@ -1251,7 +1170,9 @@ pub fn compile_circuit_extended_image_dual_v2(ct: &[u8], desc: &ExtendedImageDua
         die("Crop region extends outside the image boundaries");
     }
     let min_size = BMP_PIXELS_START_IN_X + img_h * row_stride;
-    if pt_len < min_size { die(&format!("Container too small for {}×{} BMP", img_w, img_h)); }
+    if iv[15] & 0x80 == 0 && pt_len < min_size { die(&format!("Container too small for {}×{} BMP", img_w, img_h)); }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -1266,36 +1187,21 @@ pub fn compile_circuit_extended_image_dual_v2(ct: &[u8], desc: &ExtendedImageDua
         block_outputs.push(gates.len() - 1);
     }
 
-    // Phase 2: SHA256(full)
-    let rem = pt_len % block_size;
-    let len_bits_full = (pt_len as u64) * 8;
-    let last_aes = (*block_outputs.last().unwrap() + 1) as i64;
-    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
-    if rem == 0 {
-        let mut extra = vec![0u8; 64]; extra[0] = 0x80;
-        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-    } else {
-        let pad_extra = rem > block_size - 9;
-        let mut mask = vec![0u8; 64]; mask[rem] = 0x80;
-        if !pad_extra { mask[56..].copy_from_slice(&len_bits_full.to_be_bytes()); }
-        let mg = push_const2(&mut gates, &mask);
-        let pg = push_gate(&mut gates, GateV2 { opcode: OPCODE_XOR, sons: vec![last_aes, mg], params: vec![] });
-        *full_sha_blocks.last_mut().unwrap() = (pg - 1) as usize;
-        if pad_extra {
-            let mut extra = vec![0u8; 64]; extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-            let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-        }
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if iv[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 };
     }
-    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
-    let dsha_gate = push_const1(&mut gates, &desc.d_sha);
-    let sha_comp = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_full_sha, dsha_gate], params: vec![] });
+
+    // Phase 2: SHA256(decompress(ct))
+    let sha_comp = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
 
     // Phase 3a: NN thumbnail
     let thumb_blocks = emit_pixel_region_gates(
         &mut gates, &block_outputs,
         256, 256, img_h, row_stride,
         |ox, oy| (ox * img_w / 256, oy * img_h / 256),
+        lz4_srcs.as_deref(),
     );
     let final_thumb_sha = sha_region_196608(&mut gates, &thumb_blocks);
     let dthumb_gate = push_const1(&mut gates, &desc.d_thumb);
@@ -1306,13 +1212,14 @@ pub fn compile_circuit_extended_image_dual_v2(ct: &[u8], desc: &ExtendedImageDua
         &mut gates, &block_outputs,
         256, 256, img_h, row_stride,
         |tx, ty| (crop_x + tx, crop_y + ty),
+        lz4_srcs.as_deref(),
     );
     let final_crop_sha = sha_region_196608(&mut gates, &crop_blocks);
     let dcrop_gate = push_const1(&mut gates, &desc.d_crop);
     let crop_comp = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_crop_sha, dcrop_gate], params: vec![] });
 
-    // Phase 4: CMPOFF on header (block 0)
-    let hdr = (block_outputs[0] + 1) as i64;
+    // Phase 4: CMPOFF on header (decompressed block 0)
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let fmt_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: vec![0,0,1,0x03] });
     let mut p_sz = vec![0u8,1,4]; p_sz.extend_from_slice(&desc.d_size.to_be_bytes());
     let sz_gate  = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_sz });
@@ -1359,7 +1266,7 @@ pub struct ExtendedAudioLowresDesc {
 ///   1. SHA256(x) = d_sha
 ///   2. SHA256(decimated[0..N]) = d_lowres  (N = 240 000, K = ⌈d_total_samples/N⌉)
 ///   3. format tag = 0x02; size/duration/bitrate/total_samples in header
-pub fn compile_circuit_extended_audio_lowres_v2(ct: &[u8], desc: &ExtendedAudioLowresDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_audio_lowres_v2(ct: &[u8], desc: &ExtendedAudioLowresDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
     let iv = &ct[..16];
     let data = &ct[16..];
@@ -1372,9 +1279,11 @@ pub fn compile_circuit_extended_audio_lowres_v2(ct: &[u8], desc: &ExtendedAudioL
     // Last sample needed is at PCM index (AUDIO_LOWRES_SAMPLES-1)*stride_k
     let last_sample_byte = 64 + (AUDIO_LOWRES_SAMPLES - 1) * stride_k * 2 + 2;
     let min_blocks = (last_sample_byte + block_size - 1) / block_size;
-    if m < min_blocks {
+    if iv[15] & 0x80 == 0 && m < min_blocks {
         die(&format!("Container too small: {m} blocks, need ≥ {min_blocks} for stride {stride_k}"));
     }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -1390,46 +1299,23 @@ pub fn compile_circuit_extended_audio_lowres_v2(ct: &[u8], desc: &ExtendedAudioL
         block_outputs.push(gates.len() - 1);
     }
 
-    // Phase 2: SHA256(full)
-    let rem = pt_len % block_size;
-    let len_bits_full = (pt_len as u64) * 8;
-    let last_aes = (*block_outputs.last().unwrap() + 1) as i64;
-    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
-    if rem == 0 {
-        let mut extra = vec![0u8; 64]; extra[0] = 0x80;
-        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-    } else {
-        let pad_extra = rem > block_size - 9;
-        let mut mask = vec![0u8; 64]; mask[rem] = 0x80;
-        if !pad_extra { mask[56..].copy_from_slice(&len_bits_full.to_be_bytes()); }
-        let mg = push_const2(&mut gates, &mask);
-        let pg = push_gate(&mut gates, GateV2 { opcode: OPCODE_XOR, sons: vec![last_aes, mg], params: vec![] });
-        *full_sha_blocks.last_mut().unwrap() = (pg - 1) as usize;
-        if pad_extra {
-            let mut extra = vec![0u8; 64]; extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-            let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-        }
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if iv[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 };
     }
-    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
-    let dsha_gate = push_const1(&mut gates, &desc.d_sha);
-    let sha_comp  = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_full_sha, dsha_gate], params: vec![] });
+
+    // Phase 2: SHA256(decompress(ct))
+    let sha_comp = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
 
     // Phase 3: SHA256 of N decimated Int16 samples at stride K (GetByte)
-    // Extracts AUDIO_LOWRES_OUT_BYTES = 480 000 bytes, divisible by 64 → padding block needed
-    let lowres_blocks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, 64);
-    let lowres_len_bits: u64 = (AUDIO_LOWRES_OUT_BYTES as u64) * 8;
-    let mut lowres_pad = vec![0u8; 64]; lowres_pad[0] = 0x80;
-    lowres_pad[56..].copy_from_slice(&lowres_len_bits.to_be_bytes());
-    let lowres_pad_gate = push_const2(&mut gates, &lowres_pad);
-    let mut lowres_sha_input = lowres_blocks;
-    lowres_sha_input.push((lowres_pad_gate - 1) as usize);
-    let final_lowres_sha = sha_chain(&mut gates, &lowres_sha_input);
-    let dlowres_gate = push_const1(&mut gates, &desc.d_lowres);
-    let lowres_comp  = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_lowres_sha, dlowres_gate], params: vec![] });
+    let lowres_gate_blks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, 64, lz4_srcs.as_deref());
+    let final_lowres_sha = sha256_with_padding(&mut gates, lowres_gate_blks, AUDIO_LOWRES_OUT_BYTES);
+    let dlowres_gate     = push_const1(&mut gates, &desc.d_lowres);
+    let lowres_comp      = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_lowres_sha, dlowres_gate], params: vec![] });
 
-    // Phase 4: CMPOFF on header
-    let hdr = (block_outputs[0] + 1) as i64;
+    // Phase 4: CMPOFF on decompressed header
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let fmt_gate  = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: vec![0,0,1,0x02] });
     let mut p_sz  = vec![0u8,1,4];  p_sz.extend_from_slice(&desc.d_size.to_be_bytes());
     let sz_gate   = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_sz });
@@ -1476,7 +1362,7 @@ pub struct ExtendedAudioBothDesc {
 ///
 /// Verifies: SHA256(x)=d_sha, SHA256(x[64..480064])=d_crop,
 /// SHA256(decimated)=d_lowres, format=0x03, header fields.
-pub fn compile_circuit_extended_audio_both_v2(ct: &[u8], desc: &ExtendedAudioBothDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_audio_both_v2(ct: &[u8], desc: &ExtendedAudioBothDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
     let iv = &ct[..16];
     let data = &ct[16..];
@@ -1488,7 +1374,9 @@ pub fn compile_circuit_extended_audio_both_v2(ct: &[u8], desc: &ExtendedAudioBot
     let stride_k = total_samples.div_ceil(AUDIO_LOWRES_SAMPLES).max(1);
     let last_sample_byte = 64 + (AUDIO_LOWRES_SAMPLES - 1) * stride_k * 2 + 2;
     let min_blocks = (last_sample_byte.max(64 + AUDIO_CROP_BYTES) + block_size - 1) / block_size;
-    if m < min_blocks { die(&format!("Container too small: {m} blocks, need ≥ {min_blocks}")); }
+    if iv[15] & 0x80 == 0 && m < min_blocks { die(&format!("Container too small: {m} blocks, need ≥ {min_blocks}")); }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -1504,56 +1392,30 @@ pub fn compile_circuit_extended_audio_both_v2(ct: &[u8], desc: &ExtendedAudioBot
         block_outputs.push(gates.len() - 1);
     }
 
-    // Phase 2: SHA256(full)
-    let rem = pt_len % block_size;
-    let len_bits_full = (pt_len as u64) * 8;
-    let last_aes = (*block_outputs.last().unwrap() + 1) as i64;
-    let mut full_sha_blocks: Vec<usize> = block_outputs.clone();
-    if rem == 0 {
-        let mut extra = vec![0u8; 64]; extra[0] = 0x80;
-        extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-        let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-    } else {
-        let pad_extra = rem > block_size - 9;
-        let mut mask = vec![0u8; 64]; mask[rem] = 0x80;
-        if !pad_extra { mask[56..].copy_from_slice(&len_bits_full.to_be_bytes()); }
-        let mg = push_const2(&mut gates, &mask);
-        let pg = push_gate(&mut gates, GateV2 { opcode: OPCODE_XOR, sons: vec![last_aes, mg], params: vec![] });
-        *full_sha_blocks.last_mut().unwrap() = (pg - 1) as usize;
-        if pad_extra {
-            let mut extra = vec![0u8; 64]; extra[56..].copy_from_slice(&len_bits_full.to_be_bytes());
-            let h = push_const2(&mut gates, &extra); full_sha_blocks.push((h - 1) as usize);
-        }
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if iv[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 };
     }
-    let final_full_sha = sha_chain(&mut gates, &full_sha_blocks);
-    let dsha_gate = push_const1(&mut gates, &desc.d_sha);
-    let sha_comp  = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_full_sha, dsha_gate], params: vec![] });
 
-    // Phase 3a: SHA256(crop, blocks 1..=7500, 480 000 bytes, block-range)
-    let crop_len_bits: u64 = (AUDIO_CROP_BYTES as u64) * 8;
-    let mut crop_pad = vec![0u8; 64]; crop_pad[0] = 0x80;
-    crop_pad[56..].copy_from_slice(&crop_len_bits.to_be_bytes());
-    let crop_pad_gate = push_const2(&mut gates, &crop_pad);
-    let mut crop_sha_blocks: Vec<usize> = block_outputs[1..AUDIO_CROP_BLOCKS + 1].to_vec();
-    crop_sha_blocks.push((crop_pad_gate - 1) as usize);
-    let final_crop_sha = sha_chain(&mut gates, &crop_sha_blocks);
-    let dcrop_gate  = push_const1(&mut gates, &desc.d_crop);
-    let crop_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_crop_sha, dcrop_gate], params: vec![] });
+    // Phase 2: SHA256(decompress(ct))
+    let sha_comp = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+
+    // Phase 3a: SHA256 of first AUDIO_CROP_BYTES of audio data
+    let raw_crop_slice = &block_outputs[1..AUDIO_CROP_BLOCKS + 1];
+    let crop_comp = range_sha_comp_gate(
+        &mut gates, &block_outputs, lz4_srcs.as_deref(),
+        64, AUDIO_CROP_BYTES, raw_crop_slice, &desc.d_crop,
+    );
 
     // Phase 3b: SHA256 of N decimated samples at stride K (GetByte)
-    let lowres_blocks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, 64);
-    let low_len_bits: u64 = (AUDIO_LOWRES_OUT_BYTES as u64) * 8;
-    let mut low_pad = vec![0u8; 64]; low_pad[0] = 0x80;
-    low_pad[56..].copy_from_slice(&low_len_bits.to_be_bytes());
-    let low_pad_gate  = push_const2(&mut gates, &low_pad);
-    let mut low_sha_input = lowres_blocks;
-    low_sha_input.push((low_pad_gate - 1) as usize);
-    let final_low_sha  = sha_chain(&mut gates, &low_sha_input);
-    let dlowres_gate   = push_const1(&mut gates, &desc.d_lowres);
-    let low_comp       = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_low_sha, dlowres_gate], params: vec![] });
+    let low_gate_blks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, 64, lz4_srcs.as_deref());
+    let final_low_sha = sha256_with_padding(&mut gates, low_gate_blks, AUDIO_LOWRES_OUT_BYTES);
+    let dlowres_gate  = push_const1(&mut gates, &desc.d_lowres);
+    let low_comp      = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_low_sha, dlowres_gate], params: vec![] });
 
-    // Phase 4: CMPOFF on header
-    let hdr = (block_outputs[0] + 1) as i64;
+    // Phase 4: CMPOFF on decompressed header
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let fmt_gate  = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: vec![0,0,1,0x03] });
     let mut p_sz  = vec![0u8,1,4];  p_sz.extend_from_slice(&desc.d_size.to_be_bytes());
     let sz_gate   = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_sz });
@@ -1575,6 +1437,157 @@ pub fn compile_circuit_extended_audio_both_v2(ct: &[u8], desc: &ExtendedAudioBot
 
     CompiledCircuitV2 { version: 1, gates, block_size: block_size as u32, num_blocks: m as u32 }
 }
+
+// ── LZ4 decompression helpers ──────────────────────────────────────────────────
+
+/// Trace which compressed-input byte each decompressed output byte came from.
+///
+/// `compressed_data` is the raw output of `lz4_flex::block::compress_prepend_size`:
+/// first 4 bytes = original size (LE u32), then LZ4 block data.
+/// Returns `sources` where `sources[i]` = byte index in `compressed_data` for output byte `i`.
+fn lz4_trace_sources(compressed_data: &[u8]) -> Vec<usize> {
+    let orig_size = u32::from_le_bytes(compressed_data[0..4].try_into().unwrap()) as usize;
+    let mut sources: Vec<usize> = Vec::with_capacity(orig_size);
+    let block = &compressed_data[4..];
+    let mut ip = 0usize;
+
+    while ip < block.len() {
+        let token = block[ip]; ip += 1;
+        let mut lit_len = (token >> 4) as usize;
+        if lit_len == 15 {
+            loop { let e = block[ip] as usize; ip += 1; lit_len += e; if e < 255 { break; } }
+        }
+        for k in 0..lit_len { sources.push(4 + ip + k); }
+        ip += lit_len;
+
+        if ip >= block.len() { break; }
+
+        let offset = u16::from_le_bytes([block[ip], block[ip+1]]) as usize; ip += 2;
+        let mut match_len = (token & 0x0F) as usize + 4;
+        if (token & 0x0F) == 15 {
+            loop { let e = block[ip] as usize; ip += 1; match_len += e; if e < 255 { break; } }
+        }
+        let out_start = sources.len();
+        for j in 0..match_len { sources.push(sources[out_start + j - offset]); }
+    }
+
+    debug_assert_eq!(sources.len(), orig_size, "LZ4 trace: output size mismatch");
+    sources
+}
+
+/// Build assembled 64-byte gate blocks for `len_bytes` consecutive decompressed bytes
+/// beginning at `start_byte`.  When LZ4 was used, every byte's actual position in the
+/// AES-CTR stream is resolved via `lz4_sources` before emitting a GETBYTE gate.
+fn build_decompressed_range_gates(
+    gates: &mut Vec<GateV2>,
+    block_outputs: &[usize],
+    lz4_sources: &[usize],
+    start_byte: usize,
+    len_bytes: usize,
+) -> Vec<usize> {
+    let n_full = len_bytes / 64;
+    let rem    = len_bytes % 64;
+    let mut out: Vec<usize> = Vec::with_capacity(n_full + if rem > 0 { 1 } else { 0 });
+
+    for blk in 0..n_full {
+        let mut bgs: Vec<i64> = Vec::with_capacity(64);
+        for b in 0..64usize {
+            let cp = lz4_sources[start_byte + blk * 64 + b];
+            let sg = (block_outputs[cp / 64] + 1) as i64;
+            bgs.push(push_gate(gates, GateV2 { opcode: OPCODE_GETBYTE, sons: vec![sg], params: vec![(cp % 64) as u8, b as u8] }));
+        }
+        out.push((xor_tree(gates, &bgs) - 1) as usize);
+    }
+    if rem > 0 {
+        let mut bgs: Vec<i64> = Vec::with_capacity(rem);
+        for b in 0..rem {
+            let cp = lz4_sources[start_byte + n_full * 64 + b];
+            let sg = (block_outputs[cp / 64] + 1) as i64;
+            bgs.push(push_gate(gates, GateV2 { opcode: OPCODE_GETBYTE, sons: vec![sg], params: vec![(cp % 64) as u8, b as u8] }));
+        }
+        out.push((xor_tree(gates, &bgs) - 1) as usize);
+    }
+    out
+}
+
+/// SHA256 with standard padding over `data_blocks` totalling `len` bytes.
+/// Returns the 1-indexed gate number of the final SHA2 gate.
+fn sha256_with_padding(gates: &mut Vec<GateV2>, mut data_blocks: Vec<usize>, len: usize) -> i64 {
+    let rem = len % 64;
+    let len_bits = (len as u64) * 8;
+    if rem == 0 {
+        let mut pad = vec![0u8; 64]; pad[0] = 0x80;
+        pad[56..].copy_from_slice(&len_bits.to_be_bytes());
+        data_blocks.push((push_const2(gates, &pad) - 1) as usize);
+    } else {
+        let pad_extra = rem > 55;
+        let mut mask = vec![0u8; 64]; mask[rem] = 0x80;
+        if !pad_extra { mask[56..].copy_from_slice(&len_bits.to_be_bytes()); }
+        let last_g = (*data_blocks.last().unwrap() + 1) as i64;
+        let mg = push_const2(gates, &mask);
+        let pg = push_gate(gates, GateV2 { opcode: OPCODE_XOR, sons: vec![last_g, mg], params: vec![] });
+        *data_blocks.last_mut().unwrap() = (pg - 1) as usize;
+        if pad_extra {
+            let mut extra = vec![0u8; 64]; extra[56..].copy_from_slice(&len_bits.to_be_bytes());
+            data_blocks.push((push_const2(gates, &extra) - 1) as usize);
+        }
+    }
+    sha_chain(gates, &data_blocks)
+}
+
+/// Return the assembled 64-byte decompressed-header gate (1-indexed) when LZ4 is used,
+/// or fall back to the first raw AES-CTR block gate when not.
+fn resolve_header_gate(
+    gates: &mut Vec<GateV2>,
+    block_outputs: &[usize],
+    lz4_srcs: Option<&[usize]>,
+) -> i64 {
+    match lz4_srcs {
+        Some(srcs) => {
+            let hb = build_decompressed_range_gates(gates, block_outputs, srcs, 0, 64);
+            (hb[0] + 1) as i64
+        }
+        None => (block_outputs[0] + 1) as i64,
+    }
+}
+
+/// Emit the full-plaintext SHA256 COMP gate, using decompressed blocks when LZ4 was used.
+fn full_sha_comp_gate(
+    gates: &mut Vec<GateV2>,
+    block_outputs: &[usize],
+    _lz4_srcs: Option<&[usize]>,
+    compressed_pt_len: usize,
+    d_sha: &[u8],
+) -> i64 {
+    // Always hash the AES-CTR block outputs (= compressed plaintext for LZ4).
+    // Building GETBYTE decompression gates for a full 48MB image would require ~48M gates
+    // and exceed WASM memory limits. d_sha = SHA256(compress(file)) for LZ4 images.
+    let final_sha = sha256_with_padding(gates, block_outputs.to_vec(), compressed_pt_len);
+    let dsha_gate = push_const1(gates, d_sha);
+    push_gate(gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_sha, dsha_gate], params: vec![] })
+}
+
+/// Emit SHA256 COMP gate over a contiguous byte range [range_start, range_start+range_len)
+/// of the decompressed stream (or the raw AES-CTR stream when LZ4 is not used).
+/// When not LZ4, `raw_block_slice` must cover exactly that range.
+fn range_sha_comp_gate(
+    gates: &mut Vec<GateV2>,
+    block_outputs: &[usize],
+    lz4_srcs: Option<&[usize]>,
+    range_start: usize,
+    range_len: usize,
+    raw_block_slice: &[usize],
+    d_hash: &[u8],
+) -> i64 {
+    let blks: Vec<usize> = match lz4_srcs {
+        Some(srcs) => build_decompressed_range_gates(gates, block_outputs, srcs, range_start, range_len),
+        None       => raw_block_slice.to_vec(),
+    };
+    let final_sha = sha256_with_padding(gates, blks, range_len);
+    let dhash_gate = push_const1(gates, d_hash);
+    push_gate(gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_sha, dhash_gate], params: vec![] })
+}
+
 /// Emit GETBYTE + XOR-tree gates that extract `AUDIO_LOWRES_SAMPLES` decimated Int16 samples
 /// at stride `stride_k` starting at `audio_start` bytes into the container.
 ///
@@ -1591,6 +1604,7 @@ fn emit_audio_decimated_gates(
     block_outputs: &[usize],
     stride_k: usize,
     audio_start: usize,
+    lz4_sources: Option<&[usize]>,
 ) -> Vec<usize> {
     debug_assert_eq!(AUDIO_LOWRES_OUT_BYTES % 64, 0);
     let n_out_blocks = AUDIO_LOWRES_OUT_BYTES / 64;
@@ -1598,14 +1612,13 @@ fn emit_audio_decimated_gates(
     let mut byte_gates: Vec<i64> = Vec::with_capacity(64);
 
     for p in 0..AUDIO_LOWRES_OUT_BYTES {
-        // p is the byte index within the decimated output buffer.
-        // Each Int16 sample = 2 bytes; sample index and byte within sample:
-        let sample_idx       = p / 2;
+        let sample_idx         = p / 2;
         let byte_within_sample = p % 2;
-        // Source position in the container (0-indexed):
         let container_byte = audio_start + sample_idx * stride_k * 2 + byte_within_sample;
-        let src_block  = container_byte / 64;
-        let src_offset = (container_byte % 64) as u8;
+        let (src_block, src_offset) = match lz4_sources {
+            Some(srcs) => { let cp = srcs[container_byte]; (cp / 64, (cp % 64) as u8) }
+            None       => (container_byte / 64, (container_byte % 64) as u8),
+        };
         let dst_offset = (p % 64) as u8;
 
         if src_block >= block_outputs.len() {
@@ -1720,6 +1733,7 @@ fn emit_pixel_region_gates(
     img_h: usize,
     row_stride: usize,
     pixel_src: impl Fn(usize, usize) -> (usize, usize),
+    lz4_sources: Option<&[usize]>,
 ) -> Vec<usize> {
     let total_out_bytes = out_w * out_h * 3;
     debug_assert_eq!(total_out_bytes % 64, 0, "region size must be divisible by 64");
@@ -1738,8 +1752,10 @@ fn emit_pixel_region_gates(
             let bmp_row = img_h - 1 - sy; // BMP stores rows bottom-to-top
             for ch in 0..3usize {
                 let x_byte = BMP_PIXELS_START_IN_X + bmp_row * row_stride + sx * 3 + ch;
-                let blk = x_byte / 64;
-                let src_off = (x_byte % 64) as u8;
+                let (blk, src_off) = match lz4_sources {
+                    Some(srcs) => { let cp = srcs[x_byte]; (cp / 64, (cp % 64) as u8) }
+                    None       => (x_byte / 64, (x_byte % 64) as u8),
+                };
                 let dst_off = (out_byte_idx % 64) as u8;
                 if blk >= block_outputs.len() {
                     die(&format!(
@@ -1940,6 +1956,7 @@ fn emit_video_thumb_gates(
     gates: &mut Vec<GateV2>,
     block_outputs: &[usize],
     frame_w: usize,
+    lz4_sources: Option<&[usize]>,
 ) -> Vec<usize> {
     debug_assert_eq!(VIDEO_THUMB_BYTES % 64, 0);
     let num_out_blocks = VIDEO_THUMB_BYTES / 64;
@@ -1951,8 +1968,10 @@ fn emit_video_thumb_gates(
         for ox in 0..VIDEO_THUMB_W {
             for ch in 0..3usize {
                 let container_byte = 64 + oy * frame_w * 3 + ox * 3 + ch;
-                let blk       = container_byte / 64;
-                let src_off   = (container_byte % 64) as u8;
+                let (blk, src_off) = match lz4_sources {
+                    Some(srcs) => { let cp = srcs[container_byte]; (cp / 64, (cp % 64) as u8) }
+                    None       => (container_byte / 64, (container_byte % 64) as u8),
+                };
                 let dst_off   = (out_byte_idx % 64) as u8;
                 if blk >= block_outputs.len() {
                     die(&format!(
@@ -2068,39 +2087,40 @@ fn video_header_cmpoff(
 ///   2. SHA256(top-left 256×256 region of frame 0) = d_thumb
 ///   3. SHA256(240 000 decimated samples at stride K) = d_lowres  (full-duration low-res audio)
 ///   4. Header fields: format=0x01, size, duration, bitrate, width, height, fps, sr, n_samp
-pub fn compile_circuit_extended_video_v2(ct: &[u8], desc: &ExtendedVideoDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_video_v2(ct: &[u8], desc: &ExtendedVideoDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     let frame_w = desc.d_width as usize;
     let frame_h = desc.d_height as usize;
     if frame_w < VIDEO_THUMB_W || frame_h < VIDEO_THUMB_H {
         die("Video frame must be at least 256×256 for thumbnail extraction");
     }
+    let lz4_srcs: Option<Vec<usize>> = if ct[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
     let (mut gates, block_outputs, pt_len, m) = video_aes_phase(ct);
 
     let last_thumb_byte = 64 + (VIDEO_THUMB_H - 1) * frame_w * 3 + (VIDEO_THUMB_W - 1) * 3 + 2;
     let min_blocks = (last_thumb_byte + 63) / 64 + 1;
-    if m < min_blocks { die(&format!("Container too small for thumbnail: {m} < {min_blocks} blocks")); }
+    if ct[15] & 0x80 == 0 && m < min_blocks { die(&format!("Container too small for thumbnail: {m} < {min_blocks} blocks")); }
 
-    let sha_comp  = video_sha_full(&mut gates, &block_outputs, pt_len, &desc.d_sha);
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if ct[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: 64, num_blocks: m as u32 };
+    }
 
-    let thumb_blocks = emit_video_thumb_gates(&mut gates, &block_outputs, frame_w);
+    let sha_comp  = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+
+    let thumb_blocks = emit_video_thumb_gates(&mut gates, &block_outputs, frame_w, None);
     let thumb_sha    = sha_region_196608(&mut gates, &thumb_blocks);
     let dthumb_gate  = push_const1(&mut gates, &desc.d_thumb);
     let thumb_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![thumb_sha, dthumb_gate], params: vec![] });
 
     let audio_start = desc.d_size as usize - desc.d_n_samp as usize * 2;
     let stride_k = (desc.d_n_samp as usize).div_ceil(AUDIO_LOWRES_SAMPLES).max(1);
-    let lowres_blocks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, audio_start);
-    let lowres_len_bits: u64 = (AUDIO_LOWRES_OUT_BYTES as u64) * 8;
-    let mut lowres_pad = vec![0u8; 64]; lowres_pad[0] = 0x80;
-    lowres_pad[56..].copy_from_slice(&lowres_len_bits.to_be_bytes());
-    let lowres_pad_gate = push_const2(&mut gates, &lowres_pad);
-    let mut lowres_sha_input = lowres_blocks;
-    lowres_sha_input.push((lowres_pad_gate - 1) as usize);
-    let final_lowres_sha = sha_chain(&mut gates, &lowres_sha_input);
+    let lowres_gate_blks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, audio_start, None);
+    let final_lowres_sha = sha256_with_padding(&mut gates, lowres_gate_blks, AUDIO_LOWRES_OUT_BYTES);
     let dlowres_gate  = push_const1(&mut gates, &desc.d_lowres);
     let lowres_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_lowres_sha, dlowres_gate], params: vec![] });
 
-    let hdr = (block_outputs[0] + 1) as i64;
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, None);
     let (fmt_g, sz_g, dur_g, br_g, w_g, h_g, fps_g, sr_g, ns_g) = video_header_cmpoff(
         &mut gates, hdr, 0x01,
         desc.d_size, desc.d_duration, desc.d_bitrate, desc.d_width, desc.d_height, desc.d_fps,
@@ -2129,36 +2149,45 @@ pub fn compile_circuit_extended_video_v2(ct: &[u8], desc: &ExtendedVideoDesc) ->
 ///   2. SHA256(first d_clip_frames raw RGB24 frames) = d_clip
 ///   3. SHA256(x[audioStart..audioStart+min(480000,n_samp*2)]) = d_audio
 ///   4. Header fields: format=0x02, size, duration, bitrate, width, height, fps, sr, n_samp
-pub fn compile_circuit_extended_video_clip_v2(ct: &[u8], desc: &ExtendedVideoClipDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_video_clip_v2(ct: &[u8], desc: &ExtendedVideoClipDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     let frame_w = desc.d_width as usize;
     let frame_h = desc.d_height as usize;
     let clip_frames = desc.d_clip_frames as usize;
     let frame_bytes = frame_w * frame_h * 3;
     let clip_len_bytes = clip_frames * frame_bytes;
 
+    let lz4_srcs: Option<Vec<usize>> = if ct[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
     let (mut gates, block_outputs, pt_len, m) = video_aes_phase(ct);
 
     let clip_blocks_needed = (clip_len_bytes + 63) / 64;
     let min_blocks = 1 + clip_blocks_needed;
-    if m < min_blocks { die(&format!("Container too small for clip: {m} < {min_blocks} blocks")); }
+    if ct[15] & 0x80 == 0 && m < min_blocks { die(&format!("Container too small for clip: {m} < {min_blocks} blocks")); }
 
-    let sha_comp = video_sha_full(&mut gates, &block_outputs, pt_len, &desc.d_sha);
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if ct[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: 64, num_blocks: m as u32 };
+    }
 
-    let clip_blocks = &block_outputs[1..1 + clip_blocks_needed];
-    let clip_sha    = sha_audio_clip_bytes(&mut gates, clip_blocks, clip_len_bytes);
-    let dclip_gate  = push_const1(&mut gates, &desc.d_clip);
-    let clip_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![clip_sha, dclip_gate], params: vec![] });
+    let sha_comp = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+
+    let clip_comp = {
+        let clip_sha = sha_audio_clip_bytes(&mut gates, &block_outputs[1..1 + clip_blocks_needed], clip_len_bytes);
+        let dclip_gate = push_const1(&mut gates, &desc.d_clip);
+        push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![clip_sha, dclip_gate], params: vec![] })
+    };
 
     let audio_start_byte = desc.d_size as usize - desc.d_n_samp as usize * 2;
-    if audio_start_byte % 64 != 0 { die("Video frame data must be 64-byte aligned"); }
-    let audio_start_block = audio_start_byte / 64;
     let audio_len_bytes = (desc.d_n_samp as usize * 2).min(AUDIO_CROP_BYTES);
-    let audio_blocks_needed = if audio_len_bytes == 0 { 0 } else { (audio_len_bytes + 63) / 64 };
-    let audio_sha = sha_audio_clip_bytes(&mut gates, &block_outputs[audio_start_block..audio_start_block + audio_blocks_needed], audio_len_bytes);
-    let dcrop_gate = push_const1(&mut gates, &desc.d_crop);
-    let crop_comp  = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![audio_sha, dcrop_gate], params: vec![] });
+    let crop_comp = {
+        let audio_start_block = audio_start_byte / 64;
+        let audio_blocks_needed = if audio_len_bytes == 0 { 0 } else { (audio_len_bytes + 63) / 64 };
+        let audio_sha = sha_audio_clip_bytes(&mut gates, &block_outputs[audio_start_block..audio_start_block + audio_blocks_needed], audio_len_bytes);
+        let dcrop_gate = push_const1(&mut gates, &desc.d_crop);
+        push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![audio_sha, dcrop_gate], params: vec![] })
+    };
 
-    let hdr = (block_outputs[0] + 1) as i64;
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, None);
     let (fmt_g, sz_g, dur_g, br_g, w_g, h_g, fps_g, sr_g, ns_g) = video_header_cmpoff(
         &mut gates, hdr, 0x02,
         desc.d_size, desc.d_duration, desc.d_bitrate, desc.d_width, desc.d_height, desc.d_fps,
@@ -2189,7 +2218,7 @@ pub fn compile_circuit_extended_video_clip_v2(ct: &[u8], desc: &ExtendedVideoCli
 ///   4. SHA256(240 000 decimated audio samples, full duration) = d_lowres
 ///   5. SHA256(first min(240 000, n_samp) samples at original rate) = d_crop
 ///   6. Header fields: format=0x03, size, duration, bitrate, width, height, fps, sr, n_samp
-pub fn compile_circuit_extended_video_both_v2(ct: &[u8], desc: &ExtendedVideoBothDesc) -> CompiledCircuitV2 {
+pub fn compile_circuit_extended_video_both_v2(ct: &[u8], desc: &ExtendedVideoBothDesc, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     let frame_w = desc.d_width as usize;
     let frame_h = desc.d_height as usize;
     let clip_frames = desc.d_clip_frames as usize;
@@ -2200,51 +2229,53 @@ pub fn compile_circuit_extended_video_both_v2(ct: &[u8], desc: &ExtendedVideoBot
         die("Video frame must be at least 256×256 for thumbnail extraction");
     }
 
+    let lz4_srcs: Option<Vec<usize>> = if ct[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
     let (mut gates, block_outputs, pt_len, m) = video_aes_phase(ct);
 
     let last_thumb_byte = 64 + (VIDEO_THUMB_H - 1) * frame_w * 3 + (VIDEO_THUMB_W - 1) * 3 + 2;
     let clip_blocks_needed = (clip_len_bytes + 63) / 64;
     let min_blocks = ((last_thumb_byte + 63) / 64 + 1).max(1 + clip_blocks_needed);
-    if m < min_blocks { die(&format!("Container too small: {m} < {min_blocks} blocks")); }
+    if ct[15] & 0x80 == 0 && m < min_blocks { die(&format!("Container too small: {m} < {min_blocks} blocks")); }
 
-    let sha_comp  = video_sha_full(&mut gates, &block_outputs, pt_len, &desc.d_sha);
+    // LZ4: both vendor and buyer compile the same minimal circuit from the IV flag alone.
+    if ct[15] & 0x80 != 0 {
+        full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+        return CompiledCircuitV2 { version: 1, gates, block_size: 64, num_blocks: m as u32 };
+    }
 
-    let thumb_blocks = emit_video_thumb_gates(&mut gates, &block_outputs, frame_w);
+    let sha_comp  = full_sha_comp_gate(&mut gates, &block_outputs, None, pt_len, &desc.d_sha);
+
+    let thumb_blocks = emit_video_thumb_gates(&mut gates, &block_outputs, frame_w, None);
     let thumb_sha    = sha_region_196608(&mut gates, &thumb_blocks);
     let dthumb_gate  = push_const1(&mut gates, &desc.d_thumb);
     let thumb_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![thumb_sha, dthumb_gate], params: vec![] });
 
-    let clip_blocks = &block_outputs[1..1 + clip_blocks_needed];
-    let clip_sha    = sha_audio_clip_bytes(&mut gates, clip_blocks, clip_len_bytes);
-    let dclip_gate  = push_const1(&mut gates, &desc.d_clip);
-    let clip_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![clip_sha, dclip_gate], params: vec![] });
+    let clip_comp = {
+        let clip_sha = sha_audio_clip_bytes(&mut gates, &block_outputs[1..1 + clip_blocks_needed], clip_len_bytes);
+        let dclip_gate = push_const1(&mut gates, &desc.d_clip);
+        push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![clip_sha, dclip_gate], params: vec![] })
+    };
 
     let audio_start = desc.d_size as usize - desc.d_n_samp as usize * 2;
-    if audio_start % 64 != 0 { die("Video frame data must be 64-byte aligned"); }
 
     // d_lowres: full-duration decimated audio (synchronized with thumbnail)
     let stride_k = (desc.d_n_samp as usize).div_ceil(AUDIO_LOWRES_SAMPLES).max(1);
-    let lowres_blocks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, audio_start);
-    let lowres_len_bits: u64 = (AUDIO_LOWRES_OUT_BYTES as u64) * 8;
-    let mut lowres_pad = vec![0u8; 64];
-    lowres_pad[0] = 0x80;
-    lowres_pad[56..].copy_from_slice(&lowres_len_bits.to_be_bytes());
-    let lowres_pad_gate = push_const2(&mut gates, &lowres_pad);
-    let mut lowres_sha_input = lowres_blocks;
-    lowres_sha_input.push((lowres_pad_gate - 1) as usize);
-    let final_lowres_sha = sha_chain(&mut gates, &lowres_sha_input);
+    let lowres_gate_blks = emit_audio_decimated_gates(&mut gates, &block_outputs, stride_k, audio_start, None);
+    let final_lowres_sha = sha256_with_padding(&mut gates, lowres_gate_blks, AUDIO_LOWRES_OUT_BYTES);
     let dlowres_gate  = push_const1(&mut gates, &desc.d_lowres);
     let lowres_comp   = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![final_lowres_sha, dlowres_gate], params: vec![] });
 
     // d_crop: first 240k samples at original rate (synchronized with clip)
-    let audio_start_block = audio_start / 64;
     let crop_len_bytes = (desc.d_n_samp as usize * 2).min(AUDIO_CROP_BYTES);
-    let crop_blocks_needed = if crop_len_bytes == 0 { 0 } else { (crop_len_bytes + 63) / 64 };
-    let crop_sha  = sha_audio_clip_bytes(&mut gates, &block_outputs[audio_start_block..audio_start_block + crop_blocks_needed], crop_len_bytes);
-    let dcrop_gate = push_const1(&mut gates, &desc.d_crop);
-    let crop_comp  = push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![crop_sha, dcrop_gate], params: vec![] });
+    let crop_comp = {
+        let audio_start_block = audio_start / 64;
+        let crop_blocks_needed = if crop_len_bytes == 0 { 0 } else { (crop_len_bytes + 63) / 64 };
+        let crop_sha = sha_audio_clip_bytes(&mut gates, &block_outputs[audio_start_block..audio_start_block + crop_blocks_needed], crop_len_bytes);
+        let dcrop_gate = push_const1(&mut gates, &desc.d_crop);
+        push_gate(&mut gates, GateV2 { opcode: OPCODE_COMP, sons: vec![crop_sha, dcrop_gate], params: vec![] })
+    };
 
-    let hdr = (block_outputs[0] + 1) as i64;
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, None);
     let (fmt_g, sz_g, dur_g, br_g, w_g, h_g, fps_g, sr_g, ns_g) = video_header_cmpoff(
         &mut gates, hdr, 0x03,
         desc.d_size, desc.d_duration, desc.d_bitrate, desc.d_width, desc.d_height, desc.d_fps,
@@ -3594,7 +3625,7 @@ fn sha_desc_audio(
 ///   Phase 4: CONST blocks for Q (ELA-light, embedded in circuit)
 ///   Phase 5: SHA2 chain over T_lr ‖ T_cr ‖ Q ‖ D → compare to d
 ///   Phase 6: CMPOFF header checks (w, h in SOX container header)
-pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> CompiledCircuitV2 {
+pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
     let iv = &ct[..16];
     let data = &ct[16..];
@@ -3607,12 +3638,14 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> 
     let row_stride = (img_w * 3 + 3) / 4 * 4;
 
     let min_size = BMP_PIXELS_START_IN_X + img_h * row_stride;
-    if pt_len < min_size {
+    if iv[15] & 0x80 == 0 && pt_len < min_size {
         die(&format!("Container too small: {} bytes, need ≥ {} for {}×{} BMP", pt_len, min_size, img_w, img_h));
     }
     if desc.q_bytes.len() != 65536 {
         die("Q must be 65536 bytes (ELA-light quality map)");
     }
+
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
 
     let mut gates: Vec<GateV2> = Vec::new();
     let mut block_outputs: Vec<usize> = Vec::with_capacity(m);
@@ -3635,6 +3668,7 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> 
         256, 256,
         img_h, row_stride,
         |ox, oy| (ox * img_w / 256, oy * img_h / 256),
+        lz4_srcs.as_deref(),
     );
 
     // Phase 3: T_cr — full-resolution crop.
@@ -3646,6 +3680,7 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> 
         256, 256,
         img_h, row_stride,
         |ox, oy| (crop_x + ox, crop_y + oy),
+        lz4_srcs.as_deref(),
     );
 
     // Phase 4+5: SHA256(T_lr ‖ T_cr ‖ Q ‖ D), Q as CONST.
@@ -3671,8 +3706,8 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> 
         params: vec![],
     });
 
-    // Phase 6: CMPOFF checks on SOX container header (block 0).
-    let hdr = (block_outputs[0] + 1) as i64;
+    // Phase 6: CMPOFF checks on SOX container header (decompressed block 0).
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let mut p_w = vec![0u8, 5, 4]; p_w.extend_from_slice(&desc.d_width.to_be_bytes());
     let width_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_w });
     let mut p_h = vec![0u8, 9, 4]; p_h.extend_from_slice(&desc.d_height.to_be_bytes());
@@ -3694,7 +3729,7 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3) -> 
 ///   D = dur ‖ sr ‖ n_samp (12B) in final padded block
 const AUDIO_V3_CROP_BLOCKS: usize = 7_500; // 480000 bytes / 64
 
-pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3) -> CompiledCircuitV2 {
+pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3, lz4_plain: Option<&[u8]>) -> CompiledCircuitV2 {
     if ct.len() < 16 { die("Ciphertext must include a 16-byte IV"); }
     let iv = &ct[..16];
     let data = &ct[16..];
@@ -3702,7 +3737,9 @@ pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3) -> CompiledC
     let pt_len = data.len();
     let m = (pt_len + block_size - 1) / block_size;
 
-    if m < AUDIO_V3_CROP_BLOCKS + 1 {
+    let lz4_srcs: Option<Vec<usize>> = if iv[15] & 0x80 == 0 { lz4_plain.map(|p| lz4_trace_sources(p)) } else { None };
+
+    if iv[15] & 0x80 == 0 && m < AUDIO_V3_CROP_BLOCKS + 1 {
         die("Extended audio V3 requires at least 7501 blocks (1 header + 7500 crop)");
     }
     if desc.q_bytes.len() != 1024 {
@@ -3723,8 +3760,11 @@ pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3) -> CompiledC
         block_outputs.push(gates.len() - 1);
     }
 
-    // T = plaintext blocks 1..7501 (bytes 64..480064 = first 240k Int16 samples).
-    let t_block_gates: Vec<usize> = block_outputs[1..=AUDIO_V3_CROP_BLOCKS].to_vec();
+    // T = bytes 64..480064 (first 240k Int16 samples) of the decompressed plaintext.
+    let t_block_gates: Vec<usize> = match lz4_srcs.as_deref() {
+        Some(srcs) => build_decompressed_range_gates(&mut gates, &block_outputs, srcs, 64, AUDIO_V3_CROP_BLOCKS * 64),
+        None => block_outputs[1..=AUDIO_V3_CROP_BLOCKS].to_vec(),
+    };
 
     // Phase 2+3: SHA256(T ‖ Q ‖ D), Q as CONST.
     let d_bytes: Vec<u8> = [
@@ -3741,8 +3781,8 @@ pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3) -> CompiledC
         params: vec![],
     });
 
-    // Header CMPOFF checks (block 0): format, duration, sr, n_samp.
-    let hdr = (block_outputs[0] + 1) as i64;
+    // Header CMPOFF checks (decompressed block 0): format, duration, sr, n_samp.
+    let hdr = resolve_header_gate(&mut gates, &block_outputs, lz4_srcs.as_deref());
     let mut p_dur = vec![0u8, 5, 4]; p_dur.extend_from_slice(&desc.d_dur.to_be_bytes());
     let dur_gate = push_gate(&mut gates, GateV2 { opcode: OPCODE_CMPOFF, sons: vec![hdr], params: p_dur });
     let mut p_sr = vec![0u8, 13, 4]; p_sr.extend_from_slice(&desc.d_sr.to_be_bytes());
