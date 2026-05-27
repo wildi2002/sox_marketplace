@@ -251,6 +251,7 @@ export default function NonAcceptedPrecontractModal({
         desc_dim,
         desc_thumb,
         desc_quality,
+        desc_h_container,
     } = contract;
 
     const formatBytes = (bytes: number): string => {
@@ -486,7 +487,8 @@ export default function NonAcceptedPrecontractModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [contract?.id]);
 
-    // desc V3 buyer pre-payment check: verify SHA256(T ‖ Q ‖ D) = d
+    // desc V3 buyer pre-payment check: verify SHA256(T ‖ Q ‖ D [‖ H]) = d
+    // H = SHA256(x̂) is included when desc_h_container is present; absent for video or older listings.
     // Falls back to the first 32 bytes of item_description when desc_d is not a separate field.
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useEffect(() => {
@@ -516,11 +518,19 @@ export default function NonAcceptedPrecontractModal({
                 const d = new Uint8Array(dHex.length / 2);
                 for (let i = 0; i < d.length; i++) d[i] = parseInt(dHex.slice(i * 2, i * 2 + 2), 16);
 
-                const tqd = new Uint8Array(t.length + q.length + d.length);
-                tqd.set(t, 0);
-                tqd.set(q, t.length);
-                tqd.set(d, t.length + q.length);
-                const hashBuf = await crypto.subtle.digest("SHA-256", tqd);
+                let h: Uint8Array | null = null;
+                if (desc_h_container) {
+                    const hHex = desc_h_container.replace(/^0x/, "");
+                    h = new Uint8Array(hHex.length / 2);
+                    for (let i = 0; i < h.length; i++) h[i] = parseInt(hHex.slice(i * 2, i * 2 + 2), 16);
+                }
+
+                const tqdh = new Uint8Array(t.length + q.length + d.length + (h ? h.length : 0));
+                tqdh.set(t, 0);
+                tqdh.set(q, t.length);
+                tqdh.set(d, t.length + q.length);
+                if (h) tqdh.set(h, t.length + q.length + d.length);
+                const hashBuf = await crypto.subtle.digest("SHA-256", tqdh);
                 const computed = Array.from(new Uint8Array(hashBuf))
                     .map(b => b.toString(16).padStart(2, "0")).join("");
                 setDescComputedHash(computed);
@@ -662,7 +672,7 @@ export default function NonAcceptedPrecontractModal({
             <div className="grid grid-cols-2 gap-4">
                 {listing_type === "audio" && (algorithm_suite === "extended_audio" || algorithm_suite === "extended_audio_lowres" || algorithm_suite === "extended_audio_both") && (() => {
                     const descHex = (item_description || "").replace(/^0x/, "");
-                    // desc V3: d = SHA256(T‖Q‖D) — single 32-byte commitment
+                    // desc V3: d = SHA256(T‖Q‖D‖H) — single 32-byte commitment
                     const dShaHex = descHex.slice(0, 64);
                     // Parse D from desc_dim (desc V3) if available: [duration_s, sample_rate, n_samples]
                     const dimHex = (desc_dim || "").replace(/^0x/, "");
@@ -684,7 +694,7 @@ export default function NonAcceptedPrecontractModal({
                         <div className="flex items-center justify-between mb-3">
                             <p className="font-semibold text-gray-800">Audio Description</p>
                             <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-purple-100 text-purple-800">
-                                SHA256(T ‖ Q ‖ D)
+                                SHA256(T ‖ Q ‖ D ‖ H)
                             </span>
                         </div>
 
@@ -747,12 +757,12 @@ export default function NonAcceptedPrecontractModal({
                             }
                             <p className="pt-1 border-t border-gray-200 mt-1">
                                 <span className="text-gray-400 font-sans">d</span>
-                                <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D))</span>
+                                <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D‖H))</span>
                                 {dShaHex.slice(0, 32)}…
                             </p>
                         </div>
 
-                        {/* SHA256(T‖Q‖D) verification */}
+                        {/* SHA256(T‖Q‖D‖H) verification */}
                         {descAcceptedHash !== null && (
                             <div className="flex items-start gap-2 text-xs">
                                 <span className={`shrink-0 font-bold ${
@@ -761,14 +771,14 @@ export default function NonAcceptedPrecontractModal({
                                     descVerifyStatus === "fail"     ? "text-red-700" : "text-gray-400"
                                 }`}>{descVerifyStatus === "checking" ? "…" : descVerifyStatus === "ok" ? "✓" : descVerifyStatus === "fail" ? "✗" : "·"}</span>
                                 <div>
-                                    <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D) == d</span>
+                                    <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D ‖ H) == d</span>
                                     <span className="text-gray-500 ml-1">— verified locally in your browser</span>
                                     {descVerifyStatus === "fail" && (
-                                        <p className="mt-1 font-semibold text-red-800">⚠ Verification FAILED — T, Q, or D does not match d!</p>
+                                        <p className="mt-1 font-semibold text-red-800">⚠ Verification FAILED — T, Q, D, or H does not match d!</p>
                                     )}
                                     {descVerifyStatus === "ok" && (
                                         <div className="mt-0.5 text-green-700">
-                                            <p>Authentic — SHA256(T ‖ Q ‖ D) matches the committed d.</p>
+                                            <p>Authentic — SHA256(T ‖ Q ‖ D ‖ H) matches the committed d (H = SHA256(x̂)).</p>
                                             <div className="mt-1 font-mono text-[10px] space-y-0.5 text-gray-600">
                                                 <p><span className="text-gray-400 select-none">d (accepted) </span>{descAcceptedHash ?? "…"}</p>
                                                 <p><span className="text-gray-400 select-none">computed     </span>{descComputedHash ?? "…"}</p>
@@ -787,7 +797,7 @@ export default function NonAcceptedPrecontractModal({
                     const descHex = (item_description || "").replace(/^0x/, "");
                     const isClip  = algorithm_suite === "extended_video_clip";
                     const isBoth  = algorithm_suite === "extended_video_both";
-                    // desc V3: d = SHA256(T‖Q‖D) — single 32-byte commitment, no sub-hashes
+                    // desc V3: d = SHA256(T‖Q‖D‖H) — single 32-byte commitment, no sub-hashes
                     const dShaHex = descHex.slice(0, 64);
                     const qBytes  = desc_quality ? Math.round(atob(desc_quality).length) : 0;
                     return (
@@ -800,7 +810,7 @@ export default function NonAcceptedPrecontractModal({
                             <div className="flex items-center justify-between mb-3">
                                 <p className="font-semibold text-gray-800">Video Description</p>
                                 <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-green-100 text-green-800">
-                                    T ‖ Q ‖ D
+                                    T ‖ Q ‖ D ‖ H
                                 </span>
                             </div>
 
@@ -850,12 +860,12 @@ export default function NonAcceptedPrecontractModal({
                                 {ext_video_fps      != null && <p><span className="text-gray-400">{"fps".padEnd(8)}</span> {ext_video_fps}</p>}
                                 <p className="pt-1 border-t border-gray-200 mt-1">
                                     <span className="text-gray-400 font-sans">d</span>
-                                    <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D))</span>
+                                    <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D‖H))</span>
                                     {dShaHex.slice(0, 32)}…
                                 </p>
                             </div>
 
-                            {/* SHA256(T‖Q‖D) verification */}
+                            {/* SHA256(T‖Q‖D‖H) verification */}
                             {descAcceptedHash !== null && (
                                 <div className="flex items-start gap-2 text-xs">
                                     <span className={`shrink-0 font-bold ${
@@ -864,14 +874,14 @@ export default function NonAcceptedPrecontractModal({
                                         descVerifyStatus === "fail"     ? "text-red-700" : "text-gray-400"
                                     }`}>{descVerifyStatus === "checking" ? "…" : descVerifyStatus === "ok" ? "✓" : descVerifyStatus === "fail" ? "✗" : "·"}</span>
                                     <div>
-                                        <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D) == d</span>
+                                        <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D ‖ H) == d</span>
                                         <span className="text-gray-500 ml-1">— verified locally in your browser</span>
                                         {descVerifyStatus === "fail" && (
-                                            <p className="mt-1 font-semibold text-red-800">⚠ Verification FAILED — T, Q, or D does not match d!</p>
+                                            <p className="mt-1 font-semibold text-red-800">⚠ Verification FAILED — T, Q, D, or H does not match d!</p>
                                         )}
                                         {descVerifyStatus === "ok" && (
                                             <div className="mt-0.5 text-green-700">
-                                                <p>Authentic — SHA256(T ‖ Q ‖ D) matches the committed d.</p>
+                                                <p>Authentic — SHA256(T ‖ Q ‖ D ‖ H) matches the committed d (H = SHA256(x̂)).</p>
                                                 <div className="mt-1 font-mono text-[10px] space-y-0.5 text-gray-600">
                                                     <p><span className="text-gray-400 select-none">d (accepted) </span>{descAcceptedHash ?? "…"}</p>
                                                     <p><span className="text-gray-400 select-none">computed     </span>{descComputedHash ?? "…"}</p>
@@ -887,7 +897,7 @@ export default function NonAcceptedPrecontractModal({
 
                 {listing_type === "image" && (
                     <>
-                        {/* desc V3 buyer pre-payment verification: SHA256(T ‖ Q ‖ D) = d */}
+                        {/* desc V3 buyer pre-payment verification: SHA256(T ‖ Q ‖ D ‖ H) = d */}
                         {desc_d && (() => {
                             // Parse D (dim bytes) as sequence of BE u32s
                             const dimHex = (desc_dim || "").replace(/^0x/, "");
@@ -919,11 +929,11 @@ export default function NonAcceptedPrecontractModal({
                                         descVerifyStatus === "ok"   ? "bg-green-100 text-green-800" :
                                         descVerifyStatus === "fail" ? "bg-red-100 text-red-800" :
                                         "bg-gray-100 text-gray-600"
-                                    }`}>SHA256(T ‖ Q ‖ D)</span>
+                                    }`}>SHA256(T ‖ Q ‖ D ‖ H)</span>
                                 </div>
                                 <p className="text-xs text-gray-500 mb-3">
-                                    The vendor publishes T (preview), Q (quality map), and D (metadata).
-                                    Your browser verifies SHA256(T ‖ Q ‖ D) = d before you pay — no ciphertext required.
+                                    The vendor publishes T (preview), Q (quality map), D (metadata), and H = SHA256(x̂).
+                                    Your browser verifies SHA256(T ‖ Q ‖ D ‖ H) = d before you pay — no ciphertext required.
                                 </p>
 
                                 {/* Visual previews of T and Q */}
@@ -977,7 +987,7 @@ export default function NonAcceptedPrecontractModal({
                                     ))}
                                     <p className="mt-1 pt-1 border-t border-gray-200">
                                         <span className="text-gray-400 font-sans">d</span>
-                                        <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D))</span>
+                                        <span className="text-gray-400 font-sans text-[10px] ml-1 mr-2">(committed SHA256(T‖Q‖D‖H))</span>
                                         {(descAcceptedHash ?? "").slice(0, 32)}…
                                     </p>
                                 </div>
@@ -995,16 +1005,16 @@ export default function NonAcceptedPrecontractModal({
                                          descVerifyStatus === "fail"     ? "✗" : "·"}
                                     </span>
                                     <div>
-                                        <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D) == d</span>
+                                        <span className="font-medium text-gray-700">SHA256(T ‖ Q ‖ D ‖ H) == d</span>
                                         <span className="text-gray-500 ml-1">— verified locally in your browser</span>
                                         {descVerifyStatus === "fail" && (
                                             <p className="mt-1 font-semibold text-red-800">
-                                                ⚠ Verification FAILED — T, Q, or D does not match d!
+                                                ⚠ Verification FAILED — T, Q, D, or H does not match d!
                                             </p>
                                         )}
                                         {descVerifyStatus === "ok" && (
                                             <div className="mt-0.5 text-green-700">
-                                                <p>Authentic — SHA256(T ‖ Q ‖ D) matches the committed d.</p>
+                                                <p>Authentic — SHA256(T ‖ Q ‖ D ‖ H) matches the committed d (H = SHA256(x̂)).</p>
                                                 <div className="mt-1 font-mono text-[10px] space-y-0.5 text-gray-600">
                                                     <p><span className="text-gray-400 select-none">d (accepted) </span>{descAcceptedHash ?? "…"}</p>
                                                     <p><span className="text-gray-400 select-none">computed     </span>{descComputedHash ?? "…"}</p>

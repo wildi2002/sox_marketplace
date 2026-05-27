@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
 interface UserState {
     publicKey: string;
@@ -24,18 +24,19 @@ const UserContext = createContext<UserContextType>({
 });
 
 export function UserProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<UserState | null>(() => {
-        if (typeof window === "undefined") return null;
+    const [user, setUser] = useState<UserState | null>(null);
+
+    useEffect(() => {
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
-            if (!saved) return null;
+            if (!saved) return;
             const parsed = JSON.parse(saved) as UserState;
             const savedUsername = localStorage.getItem(`sox_username_${parsed.publicKey}`) || undefined;
-            return { ...parsed, username: savedUsername };
+            setUser({ ...parsed, username: savedUsername });
         } catch {
-            return null;
+            // ignore corrupt storage
         }
-    });
+    }, []);
 
     const login = (publicKey: string) => {
         const savedUsername = localStorage.getItem(`sox_username_${publicKey}`) || undefined;

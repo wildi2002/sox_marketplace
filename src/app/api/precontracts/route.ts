@@ -158,12 +158,12 @@ export async function GET(req: NextRequest) {
             }
             if (!c.desc_d) {
                 const listing = db.prepare(`
-                    SELECT l.desc_d, l.desc_dim, l.desc_thumb, l.desc_quality
+                    SELECT l.desc_d, l.desc_dim, l.desc_thumb, l.desc_quality, l.desc_h_container
                     FROM purchase_requests pr
                     JOIN listings l ON l.id = pr.listing_id
                     WHERE pr.contract_id = ? LIMIT 1
-                `).get(c.id) as { desc_d: string | null; desc_dim: string | null; desc_thumb: string | null; desc_quality: string | null } | undefined;
-                if (listing?.desc_d) return { ...c, desc_d: listing.desc_d, desc_dim: listing.desc_dim, desc_thumb: listing.desc_thumb, desc_quality: listing.desc_quality };
+                `).get(c.id) as { desc_d: string | null; desc_dim: string | null; desc_thumb: string | null; desc_quality: string | null; desc_h_container: string | null } | undefined;
+                if (listing?.desc_d) return { ...c, desc_d: listing.desc_d, desc_dim: listing.desc_dim, desc_thumb: listing.desc_thumb, desc_quality: listing.desc_quality, desc_h_container: listing.desc_h_container };
                 if (listing?.desc_quality) return { ...c, desc_quality: listing.desc_quality };
             }
             return c;
@@ -353,6 +353,7 @@ export async function PUT(req: Request) {
                 desc_dim: data.desc_dim || preOut.dim_hex || null,
                 desc_thumb: data.desc_thumb || null,
                 desc_quality: data.desc_quality || null,
+                desc_h_container: data.desc_h_container || null,
             };
         } else {
             // Standard format (should no longer be used)
@@ -381,7 +382,7 @@ export async function PUT(req: Request) {
                 preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
                 ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
                 ext_video_clip_frames, preview_video_clip, ext_video_clip_hash,
-                desc_d, desc_dim, desc_thumb, desc_quality
+                desc_d, desc_dim, desc_thumb, desc_quality, desc_h_container
             ) VALUES (
                 ?, ?,
                 ?, ?, ?, ?,
@@ -398,7 +399,7 @@ export async function PUT(req: Request) {
                 ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?
+                ?, ?, ?, ?, ?
             );`);
             result = stmt.run(
                 contractData.item_description,
@@ -459,6 +460,7 @@ export async function PUT(req: Request) {
                 contractData.desc_dim,
                 contractData.desc_thumb,
                 contractData.desc_quality,
+                contractData.desc_h_container,
             );
         } catch (dbError: any) {
             console.error("❌ Error inserting into database:", dbError);

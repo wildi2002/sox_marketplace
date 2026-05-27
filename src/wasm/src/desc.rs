@@ -1,9 +1,10 @@
-/// desc.rs — T/Q/D component computation for the SOX description function.
+/// desc.rs — T/Q/D/H component computation for the SOX description function.
 ///
-/// desc(x̂) = SHA256(T ‖ Q ‖ D) where:
+/// desc(x̂) = SHA256(T ‖ Q ‖ D ‖ H) where:
 ///   T = thumb(x̂)   — visual preview bytes
 ///   Q = quality(x̂) — ELA-light Laplacian fingerprint or RMS profile
 ///   D = dim(x̂)     — dimension/metadata bytes
+///   H = SHA256(x̂)  — hash of the full canonical container
 ///
 /// x̂ is the uncompressed canonical container (BMP for images, PCM for audio).
 
@@ -233,21 +234,23 @@ pub fn compute_delta_quality(x_hat: &[u8], n_samp: u32) -> Vec<u8> {
 
 /// Compute desc components for extended_image (lowres thumbnail only).
 ///
-/// Returns (d, T, Q, D) where:
+/// Returns (d, T, Q, D, H) where:
 ///   T = 196608B lowres thumbnail
 ///   Q = 65536B ELA-light of T
 ///   D = 8B: w ‖ h (each BE u32)
-///   d = SHA256(T ‖ Q ‖ D) = 32B
+///   H = SHA256(x̂) = 32B
+///   d = SHA256(T ‖ Q ‖ D ‖ H) = 32B
 pub fn compute_image_desc_lowres(
     x_hat: &[u8],
     w: u32,
     h: u32,
-) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>) {
+) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>, [u8; 32]) {
     let t = compute_lowres_thumb(x_hat, w, h);
     let q = compute_ela_light(x_hat, w, h);
     let d_dim: Vec<u8> = [w.to_be_bytes(), h.to_be_bytes()].concat();
-    let d: [u8; 32] = sha256_tqd(&t, &q, &d_dim);
-    (d, t, q, d_dim)
+    let h_container: [u8; 32] = sha256(x_hat).try_into().expect("SHA256 is always 32 bytes");
+    let d: [u8; 32] = sha256_tqdh(&t, &q, &d_dim, &h_container);
+    (d, t, q, d_dim, h_container)
 }
 
 /// Compute desc components for extended_image_crop (crop thumbnail only).
@@ -259,12 +262,13 @@ pub fn compute_image_desc_crop(
     h: u32,
     cx: u32,
     cy: u32,
-) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>) {
+) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>, [u8; 32]) {
     let t = compute_crop_thumb(x_hat, w, h, cx, cy);
     let q = compute_ela_light(x_hat, w, h);
     let d_dim: Vec<u8> = [w.to_be_bytes(), h.to_be_bytes(), cx.to_be_bytes(), cy.to_be_bytes()].concat();
-    let d: [u8; 32] = sha256_tqd(&t, &q, &d_dim);
-    (d, t, q, d_dim)
+    let h_container: [u8; 32] = sha256(x_hat).try_into().expect("SHA256 is always 32 bytes");
+    let d: [u8; 32] = sha256_tqdh(&t, &q, &d_dim, &h_container);
+    (d, t, q, d_dim, h_container)
 }
 
 /// Compute desc components for extended_image_dual (lowres + crop).
@@ -278,7 +282,7 @@ pub fn compute_image_desc_dual(
     h: u32,
     cx: u32,
     cy: u32,
-) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>) {
+) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>, [u8; 32]) {
     let t_lr = compute_lowres_thumb(x_hat, w, h);
     let t_cr = compute_crop_thumb(x_hat, w, h, cx, cy);
     let q = compute_ela_light(x_hat, w, h);
@@ -286,8 +290,9 @@ pub fn compute_image_desc_dual(
     let mut t = Vec::with_capacity(THUMB_BYTES * 2);
     t.extend_from_slice(&t_lr);
     t.extend_from_slice(&t_cr);
-    let d: [u8; 32] = sha256_tqd(&t, &q, &d_dim);
-    (d, t, q, d_dim)
+    let h_container: [u8; 32] = sha256(x_hat).try_into().expect("SHA256 is always 32 bytes");
+    let d: [u8; 32] = sha256_tqdh(&t, &q, &d_dim, &h_container);
+    (d, t, q, d_dim, h_container)
 }
 
 // ── Audio desc ────────────────────────────────────────────────────────────────
@@ -302,12 +307,13 @@ pub fn compute_audio_desc(
     dur: u32,
     sr: u32,
     n_samp: u32,
-) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>) {
+) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>, [u8; 32]) {
     let t = compute_audio_crop_thumb(x_hat);
     let q = compute_delta_quality(x_hat, n_samp);
     let d_dim: Vec<u8> = [dur.to_be_bytes(), sr.to_be_bytes(), n_samp.to_be_bytes()].concat();
-    let d: [u8; 32] = sha256_tqd(&t, &q, &d_dim);
-    (d, t, q, d_dim)
+    let h_container: [u8; 32] = sha256(x_hat).try_into().expect("SHA256 is always 32 bytes");
+    let d: [u8; 32] = sha256_tqdh(&t, &q, &d_dim, &h_container);
+    (d, t, q, d_dim, h_container)
 }
 
 // ── Video desc ────────────────────────────────────────────────────────────────
@@ -329,7 +335,7 @@ pub fn compute_video_desc(
     sr: u32,
     n_samp: u32,
     audio_start: usize,
-) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>) {
+) -> ([u8; 32], Vec<u8>, Vec<u8>, Vec<u8>, [u8; 32]) {
     // T: top-left 256×256 of frame 0 (top-down RGB24, no BMP padding)
     let tw = (256usize).min(w as usize);
     let th = (256usize).min(h as usize);
@@ -365,24 +371,26 @@ pub fn compute_video_desc(
         sr.to_be_bytes(), n_samp.to_be_bytes(),
     ].concat();
 
-    let d: [u8; 32] = sha256_tqd(&t, &q, &d_dim);
-    (d, t, q, d_dim)
+    let h_container: [u8; 32] = sha256(x_hat).try_into().expect("SHA256 is always 32 bytes");
+    let d: [u8; 32] = sha256_tqdh(&t, &q, &d_dim, &h_container);
+    (d, t, q, d_dim, h_container)
 }
 
 // ── Verification ──────────────────────────────────────────────────────────────
 
-/// Verify that SHA256(T ‖ Q ‖ D) == d.  Buyer pre-payment check.
-pub fn verify_desc_components(d: &[u8], t: &[u8], q: &[u8], dim: &[u8]) -> bool {
+/// Verify that SHA256(T ‖ Q ‖ D ‖ H) == d.  Buyer pre-payment check.
+pub fn verify_desc_components(d: &[u8], t: &[u8], q: &[u8], dim: &[u8], h_container: &[u8]) -> bool {
     if d.len() != 32 { return false; }
-    sha256_tqd(t, q, dim).as_ref() == d
+    sha256_tqdh(t, q, dim, h_container).as_ref() == d
 }
 
 // ── Internal helper ───────────────────────────────────────────────────────────
 
-fn sha256_tqd(t: &[u8], q: &[u8], dim: &[u8]) -> [u8; 32] {
-    let mut tqd = Vec::with_capacity(t.len() + q.len() + dim.len());
-    tqd.extend_from_slice(t);
-    tqd.extend_from_slice(q);
-    tqd.extend_from_slice(dim);
-    sha256(&tqd).try_into().expect("SHA256 is always 32 bytes")
+fn sha256_tqdh(t: &[u8], q: &[u8], dim: &[u8], h: &[u8]) -> [u8; 32] {
+    let mut tqdh = Vec::with_capacity(t.len() + q.len() + dim.len() + h.len());
+    tqdh.extend_from_slice(t);
+    tqdh.extend_from_slice(q);
+    tqdh.extend_from_slice(dim);
+    tqdh.extend_from_slice(h);
+    sha256(&tqdh).try_into().expect("SHA256 is always 32 bytes")
 }

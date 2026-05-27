@@ -503,12 +503,13 @@ for (const col of [
     }
 }
 
-// desc V3 fields: d = SHA256(T‖Q‖D), dim, thumb (base64), quality (base64)
+// desc V3 fields: d = SHA256(T‖Q‖D‖H), dim, thumb (base64), quality (base64), h_container = SHA256(x̂)
 for (const col of [
     "desc_d TEXT",
     "desc_dim TEXT",
     "desc_thumb TEXT",
     "desc_quality TEXT",
+    "desc_h_container TEXT",
 ]) {
     try {
         db.exec(`ALTER TABLE listings ADD COLUMN ${col}`);
@@ -523,6 +524,7 @@ for (const col of [
     "desc_dim TEXT",
     "desc_thumb TEXT",
     "desc_quality TEXT",
+    "desc_h_container TEXT",
 ]) {
     try {
         db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`);

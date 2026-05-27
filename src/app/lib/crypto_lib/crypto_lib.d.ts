@@ -95,14 +95,9 @@ export function compute_precontract_extended_video_v2(file: Uint8Array, key: Uin
  */
 export function compute_proofs_left(circuit_bytes: Uint8Array, evaluated_circuit_bytes: Uint8Array, ct: Uint8Array, challenge: number): FinalStepComponents;
 /**
- * Compute a V3 precontract for extended_audio.
- *
- * d = SHA256(T ‖ Q ‖ D) where:
- *   T = first 240k samples as Int16-LE (480000B)
- *   Q = 256-segment RMS energy profile (1024B)
- *   D = dur ‖ sr ‖ n_samp (12B)
+ * Verify buyer pre-payment check: SHA256(T ‖ Q ‖ D ‖ H) = d.
  */
-export function compute_precontract_audio_v3(x_hat: Uint8Array, key: Uint8Array, dur: number, sr: number, n_samp: number): PrecontractV3;
+export function verify_desc(d: Uint8Array, thumb: Uint8Array, quality: Uint8Array, dim: Uint8Array, h_container: Uint8Array): boolean;
 export function compile_circuit_extended_audio_both_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
 /**
  * Computes proofs for step 8a.
@@ -134,10 +129,19 @@ export function compute_proofs(circuit_bytes: Uint8Array, evaluated_circuit_byte
  */
 export function hpre(evaluated_circuit_bytes: Uint8Array, num_blocks: number, challenge: number): Uint8Array;
 /**
- * After receiving the key, verify that the decrypted content matches the committed desc.
- * Returns success=true if SHA256(T(dec) ‖ Q(dec) ‖ D(dec)) = d.
+ * Compute a V3 precontract for extended_image_dual.
+ *
+ * d = SHA256(T_lr ‖ T_cr ‖ Q ‖ D) where:
+ *   T_lr = 256×256 lowres thumbnail (196608B)
+ *   T_cr = 256×256 crop at (cx,cy)  (196608B)
+ *   Q    = ELA-light of T_lr        (65536B)
+ *   D    = w ‖ h ‖ cx ‖ cy         (16B)
+ *
+ * The circuit verifies SHA256(T_lr_computed ‖ T_cr_computed ‖ Q_const ‖ D_const) = d,
+ * where T_lr and T_cr are extracted from the decrypted BMP via GETBYTE gates, and
+ * Q and D are embedded as CONST gates (committed through h_circuit).
  */
-export function check_received_ct_image_dual_v3(ct: Uint8Array, key: Uint8Array, d: Uint8Array, w: number, h: number, cx: number, cy: number): CheckCtResult;
+export function compute_precontract_image_dual_v3(x_hat: Uint8Array, key: Uint8Array, w: number, h: number, cx: number, cy: number): PrecontractV3;
 /**
  * Verifies a precontract by checking the commitment and description with respect to the received
  * ciphertext.
@@ -152,6 +156,11 @@ export function check_received_ct_image_dual_v3(ct: Uint8Array, key: Uint8Array,
  * A `CheckPrecontractResult` containing the verification status and hash values
  */
 export function check_precontract(description: string, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
+/**
+ * After receiving the key, verify that the decrypted content matches the committed desc.
+ * Returns success=true if SHA256(T(dec) ‖ Q(dec) ‖ D(dec)) = d.
+ */
+export function check_received_ct_image_dual_v3(ct: Uint8Array, key: Uint8Array, d: Uint8Array, w: number, h: number, cx: number, cy: number): CheckCtResult;
 /**
  * Computes precontract for a crop-preview image container (format 0x02).
  * description = d_sha(32) || d_crop(32) || imgW(4BE) || imgH(4BE) || size(4BE)
@@ -250,10 +259,10 @@ export function check_precontract_extended_video_clip_v2(description: Uint8Array
  */
 export function evaluate_circuit_v2_wasm(circuit_bytes: Uint8Array, ct: Uint8Array, key: string): EvaluatedCircuitV2;
 /**
- * Compute desc(x̂) for extended_audio (crop: first 240k samples).
- * T=480000B, Q=1024B (RMS profile), D=12B (dur‖sr‖n_samp).
+ * Compute desc(x̂) for extended_image_crop (full-resolution crop only).
+ * T=196608B, Q=65536B (ELA-light), D=16B (w‖h‖cx‖cy).
  */
-export function compute_desc_audio(x_hat: Uint8Array, dur: number, sr: number, n_samp: number): DescResult;
+export function compute_desc_image_crop(x_hat: Uint8Array, w: number, h: number, cx: number, cy: number): DescResult;
 export function compile_circuit_extended_image_dual_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
 /**
  * Compiles an extended-image V2 circuit from a 76-byte serialised description:
@@ -307,9 +316,14 @@ export function hpre_v2(evaluated_circuit_bytes: Uint8Array, num_blocks: number,
  */
 export function check_precontract_v2(description: string, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 /**
- * Verify buyer pre-payment check: SHA256(T ‖ Q ‖ D) = d.
+ * After receiving the key, verify that the decrypted audio content matches the committed desc.
  */
-export function verify_desc(d: Uint8Array, thumb: Uint8Array, quality: Uint8Array, dim: Uint8Array): boolean;
+export function check_received_ct_audio_v3(ct: Uint8Array, key: Uint8Array, d: Uint8Array, dur: number, sr: number, n_samp: number): CheckCtResult;
+/**
+ * Compute desc(x̂) for extended_image_dual (lowres + crop).
+ * T=393216B (T_lr‖T_cr), Q=65536B (ELA-light of T_lr), D=16B (w‖h‖cx‖cy).
+ */
+export function compute_desc_image_dual(x_hat: Uint8Array, w: number, h: number, cx: number, cy: number): DescResult;
 /**
  * Computes precontract for a video-clip container (format 0x02).
  * description = d_sha(32) || d_clip(32) || d_crop(32) || size(4BE) || duration(4BE) || bitrate(4BE)
@@ -328,9 +342,14 @@ export function check_received_ct_key_extended_image_v2(ct: Uint8Array, key: Uin
  */
 export function check_precontract_extended_image_dual_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 /**
- * After receiving the key, verify that the decrypted audio content matches the committed desc.
+ * Compute a V3 precontract for extended_audio.
+ *
+ * d = SHA256(T ‖ Q ‖ D) where:
+ *   T = first 240k samples as Int16-LE (480000B)
+ *   Q = 256-segment RMS energy profile (1024B)
+ *   D = dur ‖ sr ‖ n_samp (12B)
  */
-export function check_received_ct_audio_v3(ct: Uint8Array, key: Uint8Array, d: Uint8Array, dur: number, sr: number, n_samp: number): CheckCtResult;
+export function compute_precontract_audio_v3(x_hat: Uint8Array, key: Uint8Array, dur: number, sr: number, n_samp: number): PrecontractV3;
 /**
  * Verifies a dispute argument.
  *
@@ -355,11 +374,6 @@ export function compute_precontract_extended_audio_both_v2(file: Uint8Array, key
  */
 export function check_precontract_extended_audio_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 export function check_received_ct_key_extended_audio_both_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
-/**
- * Compute desc(x̂) for extended_image_crop (full-resolution crop only).
- * T=196608B, Q=65536B (ELA-light), D=16B (w‖h‖cx‖cy).
- */
-export function compute_desc_image_crop(x_hat: Uint8Array, w: number, h: number, cx: number, cy: number): DescResult;
 /**
  * Computes the proof for step 8c (V2) - corresponds to Step 8c in paper (Section F.2).
  *
@@ -402,11 +416,6 @@ export function compute_proof_right(evaluated_circuit_bytes: Uint8Array, num_blo
  * A `Precontract` containing all necessary components for the optimistic phase of the protocol
  */
 export function compute_precontract_values(file: Uint8Array, key: Uint8Array): Precontract;
-/**
- * Compute desc(x̂) for extended_image (lowres thumbnail only).
- * T=196608B, Q=65536B (ELA-light), D=8B (w‖h).
- */
-export function compute_desc_image_lowres(x_hat: Uint8Array, w: number, h: number): DescResult;
 /**
  * Computes precontract values for an audio file using the extended audio description circuit.
  *
@@ -456,10 +465,10 @@ export function compute_precontract_extended_video_both_v2(file: Uint8Array, key
 export function compute_precontract_extended_image_v2(file: Uint8Array, key: Uint8Array, d_sha: Uint8Array, d_thumb: Uint8Array, d_width: number, d_height: number, d_format: number, d_size: number): Precontract;
 export function check_received_ct_key_extended_video_clip_v2(ct: Uint8Array, key: Uint8Array, description: Uint8Array): CheckCtResult;
 /**
- * Compute desc(x̂) for extended_image_dual (lowres + crop).
- * T=393216B (T_lr‖T_cr), Q=65536B (ELA-light of T_lr), D=16B (w‖h‖cx‖cy).
+ * Compute desc(x̂) for extended_image (lowres thumbnail only).
+ * T=196608B, Q=65536B (ELA-light), D=8B (w‖h).
  */
-export function compute_desc_image_dual(x_hat: Uint8Array, w: number, h: number, cx: number, cy: number): DescResult;
+export function compute_desc_image_lowres(x_hat: Uint8Array, w: number, h: number): DescResult;
 export function compile_circuit_extended_video_v2_wasm(ct: Uint8Array, description: Uint8Array): Uint8Array;
 /**
  * Computes proofs for step 8a (V2) - corresponds to Step 8a in paper (Section F.2).
@@ -490,19 +499,10 @@ export function compute_proofs_v2(circuit_bytes: Uint8Array, evaluated_circuit_b
  */
 export function check_precontract_extended_image_crop_v2(description: Uint8Array, commitment: string, opening_value: string, ct: Uint8Array): CheckPrecontractResult;
 /**
- * Compute a V3 precontract for extended_image_dual.
- *
- * d = SHA256(T_lr ‖ T_cr ‖ Q ‖ D) where:
- *   T_lr = 256×256 lowres thumbnail (196608B)
- *   T_cr = 256×256 crop at (cx,cy)  (196608B)
- *   Q    = ELA-light of T_lr        (65536B)
- *   D    = w ‖ h ‖ cx ‖ cy         (16B)
- *
- * The circuit verifies SHA256(T_lr_computed ‖ T_cr_computed ‖ Q_const ‖ D_const) = d,
- * where T_lr and T_cr are extracted from the decrypted BMP via GETBYTE gates, and
- * Q and D are embedded as CONST gates (committed through h_circuit).
+ * Compute desc(x̂) for extended_audio (crop: first 240k samples).
+ * T=480000B, Q=1024B (RMS profile), D=12B (dur‖sr‖n_samp).
  */
-export function compute_precontract_image_dual_v3(x_hat: Uint8Array, key: Uint8Array, w: number, h: number, cx: number, cy: number): PrecontractV3;
+export function compute_desc_audio(x_hat: Uint8Array, dur: number, sr: number, n_samp: number): DescResult;
 export function bytes_to_hex(vec: Uint8Array): string;
 export function hex_to_bytes(hex_str: string): Uint8Array;
 /**
@@ -515,6 +515,18 @@ export function hex_to_bytes(hex_str: string): Uint8Array;
  * A `Commitment` containing the commitment hash and opening value
  */
 export function commit(data: Uint8Array): Commitment;
+/**
+ * Compiles a basic circuit for processing ciphertext. Once the key is bound, the circuit computes
+ * the SHA256 hash of the initial plaintext and compares it to the provided description.
+ *
+ * # Arguments
+ * * `ct_size` - Size of the ciphertext (including IV!)
+ * * `description` - Description of the plaintext
+ *
+ * # Returns
+ * A `CompiledCircuit` configured for the given parameters
+ */
+export function compile_basic_circuit(ct_size: number, description: Uint8Array): CompiledCircuit;
 /**
  * JavaScript-compatible wrapper for sha256_compress
  *
@@ -561,18 +573,6 @@ export function encrypt_block_js(data: Uint8Array[]): Uint8Array;
  * Decrypted bytes
  */
 export function decrypt_block_js(data: Uint8Array[]): Uint8Array;
-/**
- * Compiles a basic circuit for processing ciphertext. Once the key is bound, the circuit computes
- * the SHA256 hash of the initial plaintext and compares it to the provided description.
- *
- * # Arguments
- * * `ct_size` - Size of the ciphertext (including IV!)
- * * `description` - Description of the plaintext
- *
- * # Returns
- * A `CompiledCircuit` configured for the given parameters
- */
-export function compile_basic_circuit(ct_size: number, description: Uint8Array): CompiledCircuit;
 /**
  * JavaScript wrapper of the prove function
  *
@@ -733,12 +733,16 @@ export class DescResult {
   private constructor();
   free(): void;
   /**
-   * d = SHA256(T ‖ Q ‖ D) — 32 bytes.
+   * d = SHA256(T ‖ Q ‖ D ‖ H) — 32 bytes.
    */
   d: Uint8Array;
   thumb: Uint8Array;
   quality: Uint8Array;
   dim: Uint8Array;
+  /**
+   * H = SHA256(x̂) — 32 bytes, hash of the canonical uncompressed container.
+   */
+  h_container: Uint8Array;
 }
 /**
  * Represents an argument in a dispute between buyer and vendor.
@@ -974,10 +978,10 @@ export class Precontract {
   num_gates: number;
 }
 /**
- * Extended precontract with desc components T, Q, D published alongside d.
+ * Extended precontract with desc components T, Q, D, H published alongside d.
  *
- * d = SHA256(T ‖ Q ‖ D) — 32 bytes (the on-chain committed description).
- * Buyer pre-payment check: SHA256(T ‖ Q ‖ D) = d.
+ * d = SHA256(T ‖ Q ‖ D ‖ H) — 32 bytes (the on-chain committed description).
+ * Buyer pre-payment check: SHA256(T ‖ Q ‖ D ‖ H) = d.
  */
 export class PrecontractV3 {
   private constructor();
@@ -985,7 +989,7 @@ export class PrecontractV3 {
   ct: Uint8Array;
   circuit_bytes: Uint8Array;
   /**
-   * d = SHA256(T ‖ Q ‖ D) — 32 bytes.
+   * d = SHA256(T ‖ Q ‖ D ‖ H) — 32 bytes.
    */
   d: Uint8Array;
   /**
@@ -1000,6 +1004,10 @@ export class PrecontractV3 {
    * D — dimension/metadata bytes.
    */
   dim: Uint8Array;
+  /**
+   * H = SHA256(x̂) — 32 bytes, hash of the canonical uncompressed container.
+   */
+  h_container: Uint8Array;
   h_ct: Uint8Array;
   h_circuit: Uint8Array;
   commitment: Commitment;

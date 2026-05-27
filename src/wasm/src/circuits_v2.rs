@@ -3510,8 +3510,9 @@ mod tests {
 
 /// Description parameters for the extended_image_dual V3 circuit.
 pub struct ImageDualDescV3 {
-    pub d: [u8; 32],       // SHA256(T_lr ‖ T_cr ‖ Q ‖ D)
-    pub q_bytes: Vec<u8>,  // 65536B ELA-light quality map
+    pub d: [u8; 32],            // SHA256(T_lr ‖ T_cr ‖ Q ‖ D ‖ H)
+    pub q_bytes: Vec<u8>,       // 65536B ELA-light quality map
+    pub h_container: [u8; 32],  // SHA256(x̂) — hash of canonical container
     pub d_width: u32,
     pub d_height: u32,
     pub crop_x: u32,
@@ -3520,8 +3521,9 @@ pub struct ImageDualDescV3 {
 
 /// Description parameters for the extended_audio V3 circuit.
 pub struct AudioDescV3 {
-    pub d: [u8; 32],       // SHA256(T ‖ Q ‖ D)
-    pub q_bytes: Vec<u8>,  // 1024B RMS energy profile
+    pub d: [u8; 32],            // SHA256(T ‖ Q ‖ D ‖ H)
+    pub q_bytes: Vec<u8>,       // 1024B RMS energy profile
+    pub h_container: [u8; 32],  // SHA256(x̂) — hash of canonical container
     pub d_dur: u32,
     pub d_sr: u32,
     pub d_n_samp: u32,
@@ -3529,23 +3531,25 @@ pub struct AudioDescV3 {
 
 // ── V3 SHA helper: SHA256(T_lr ‖ T_cr ‖ Q ‖ D) ───────────────────────────────
 
-/// Build SHA256(T_lr ‖ T_cr ‖ Q ‖ D) in-circuit.
+/// Build SHA256(T_lr ‖ T_cr ‖ Q ‖ D ‖ H) in-circuit.
 ///
 /// T_lr and T_cr are 196608-byte pixel regions (3072 block-gate indices each).
 /// Q is 65536 bytes pushed as 1024 CONST blocks.
-/// D is 16 bytes embedded in the final padded block.
-/// Total: 393216 + 65536 + 16 = 458768 bytes → 7169 SHA2 calls.
+/// D (16B) and H (32B) are embedded in the final padded block.
+/// Total: 196608 + 196608 + 65536 + 16 + 32 = 458800 bytes → 7169 SHA2 calls.
 fn sha_desc_dual_image(
     gates: &mut Vec<GateV2>,
     t_lr_blocks: &[usize],
     t_cr_blocks: &[usize],
     q_bytes: &[u8],
     d_bytes: &[u8],
+    h_bytes: &[u8],
 ) -> i64 {
     debug_assert_eq!(t_lr_blocks.len(), 3072);
     debug_assert_eq!(t_cr_blocks.len(), 3072);
     debug_assert_eq!(q_bytes.len(), 65536);
     debug_assert_eq!(d_bytes.len(), 16);
+    debug_assert_eq!(h_bytes.len(), 32);
 
     // Push Q as 1024 × 64B CONST blocks (2 gates each).
     let mut q_block_gates: Vec<usize> = Vec::with_capacity(1024);
@@ -3554,12 +3558,13 @@ fn sha_desc_dual_image(
         q_block_gates.push((g - 1) as usize);
     }
 
-    // Final padded block: D (16B) ‖ 0x80 ‖ zeros(39B) ‖ len_bits_be_u64(8B)
-    // Total bytes = 393216 + 65536 + 16 = 458768 → len_bits = 458768 × 8 = 3670144
-    let len_bits: u64 = 458_768u64 * 8;
+    // Final padded block: D (16B) ‖ H (32B) ‖ 0x80 ‖ zeros(7B) ‖ len_bits_be_u64(8B)
+    // Total bytes = 196608 + 196608 + 65536 + 16 + 32 = 458800 → len_bits = 458800 × 8 = 3670400
+    let len_bits: u64 = 458_800u64 * 8;
     let mut final_block = vec![0u8; 64];
     final_block[..16].copy_from_slice(d_bytes);
-    final_block[16] = 0x80;
+    final_block[16..48].copy_from_slice(h_bytes);
+    final_block[48] = 0x80;
     final_block[56..].copy_from_slice(&len_bits.to_be_bytes());
     let final_g = push_const2(gates, &final_block);
     let final_gate = (final_g - 1) as usize;
@@ -3573,21 +3578,23 @@ fn sha_desc_dual_image(
     sha_chain(gates, &all_blocks)
 }
 
-/// Build SHA256(T ‖ Q ‖ D) for audio.
+/// Build SHA256(T ‖ Q ‖ D ‖ H) for audio.
 ///
 /// T is 480000 bytes = 7500 × 64B blocks (direct AES-decrypted blocks [1..7501]).
 /// Q is 1024 bytes = 16 × 64B CONST blocks.
-/// D is 12 bytes embedded in the final padded block.
-/// Total: 480000 + 1024 + 12 = 481036 bytes → 7517 SHA2 calls.
+/// D (12B) and H (32B) are embedded in the final padded block.
+/// Total: 480000 + 1024 + 12 + 32 = 481068 bytes → 7517 SHA2 calls.
 fn sha_desc_audio(
     gates: &mut Vec<GateV2>,
     t_block_gates: &[usize],
     q_bytes: &[u8],
     d_bytes: &[u8],
+    h_bytes: &[u8],
 ) -> i64 {
     debug_assert_eq!(t_block_gates.len(), 7500);
     debug_assert_eq!(q_bytes.len(), 1024);
     debug_assert_eq!(d_bytes.len(), 12);
+    debug_assert_eq!(h_bytes.len(), 32);
 
     // Q: 16 × 64B CONST blocks.
     let mut q_block_gates: Vec<usize> = Vec::with_capacity(16);
@@ -3596,12 +3603,13 @@ fn sha_desc_audio(
         q_block_gates.push((g - 1) as usize);
     }
 
-    // Final padded block: D (12B) ‖ 0x80 ‖ zeros(43B) ‖ len_bits_be_u64(8B)
-    // 481036 mod 64 = 12 → 12 ≤ 55, padding fits in same block.
-    let len_bits: u64 = 481_036u64 * 8;
+    // Final padded block: D (12B) ‖ H (32B) ‖ 0x80 ‖ zeros(11B) ‖ len_bits_be_u64(8B)
+    // Total = 480000 + 1024 + 12 + 32 = 481068 → len_bits = 481068 × 8 = 3848544
+    let len_bits: u64 = 481_068u64 * 8;
     let mut final_block = vec![0u8; 64];
     final_block[..12].copy_from_slice(d_bytes);
-    final_block[12] = 0x80;
+    final_block[12..44].copy_from_slice(h_bytes);
+    final_block[44] = 0x80;
     final_block[56..].copy_from_slice(&len_bits.to_be_bytes());
     let final_g = push_const2(gates, &final_block);
     let final_gate = (final_g - 1) as usize;
@@ -3683,7 +3691,7 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3, lz4
         lz4_srcs.as_deref(),
     );
 
-    // Phase 4+5: SHA256(T_lr ‖ T_cr ‖ Q ‖ D), Q as CONST.
+    // Phase 4+5: SHA256(T_lr ‖ T_cr ‖ Q ‖ D ‖ H), Q and H as CONST.
     let d_bytes: Vec<u8> = [
         desc.d_width.to_be_bytes(),
         desc.d_height.to_be_bytes(),
@@ -3696,6 +3704,7 @@ pub fn compile_circuit_image_dual_desc_v3(ct: &[u8], desc: &ImageDualDescV3, lz4
         &t_cr_blocks,
         &desc.q_bytes,
         &d_bytes,
+        &desc.h_container,
     );
 
     // Compare SHA2 output to committed d.
@@ -3766,13 +3775,13 @@ pub fn compile_circuit_audio_desc_v3(ct: &[u8], desc: &AudioDescV3, lz4_plain: O
         None => block_outputs[1..=AUDIO_V3_CROP_BLOCKS].to_vec(),
     };
 
-    // Phase 2+3: SHA256(T ‖ Q ‖ D), Q as CONST.
+    // Phase 2+3: SHA256(T ‖ Q ‖ D ‖ H), Q and H as CONST.
     let d_bytes: Vec<u8> = [
         desc.d_dur.to_be_bytes(),
         desc.d_sr.to_be_bytes(),
         desc.d_n_samp.to_be_bytes(),
     ].concat();
-    let final_sha = sha_desc_audio(&mut gates, &t_block_gates, &desc.q_bytes, &d_bytes);
+    let final_sha = sha_desc_audio(&mut gates, &t_block_gates, &desc.q_bytes, &d_bytes, &desc.h_container);
 
     let desc_gate = push_const1(&mut gates, &desc.d);
     let comp_gate = push_gate(&mut gates, GateV2 {

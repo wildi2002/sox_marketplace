@@ -2342,10 +2342,10 @@ pub fn compute_proof_right_v2(
 // ###   DESC V3 — single-hash desc ###
 // ####################################
 
-/// Extended precontract with desc components T, Q, D published alongside d.
+/// Extended precontract with desc components T, Q, D, H published alongside d.
 ///
-/// d = SHA256(T ‖ Q ‖ D) — 32 bytes (the on-chain committed description).
-/// Buyer pre-payment check: SHA256(T ‖ Q ‖ D) = d.
+/// d = SHA256(T ‖ Q ‖ D ‖ H) — 32 bytes (the on-chain committed description).
+/// Buyer pre-payment check: SHA256(T ‖ Q ‖ D ‖ H) = d.
 #[wasm_bindgen]
 pub struct PrecontractV3 {
     #[wasm_bindgen(getter_with_clone)]
@@ -2354,7 +2354,7 @@ pub struct PrecontractV3 {
     #[wasm_bindgen(getter_with_clone)]
     pub circuit_bytes: Vec<u8>,
 
-    /// d = SHA256(T ‖ Q ‖ D) — 32 bytes.
+    /// d = SHA256(T ‖ Q ‖ D ‖ H) — 32 bytes.
     #[wasm_bindgen(getter_with_clone)]
     pub d: Vec<u8>,
 
@@ -2369,6 +2369,10 @@ pub struct PrecontractV3 {
     /// D — dimension/metadata bytes.
     #[wasm_bindgen(getter_with_clone)]
     pub dim: Vec<u8>,
+
+    /// H = SHA256(x̂) — 32 bytes, hash of the canonical uncompressed container.
+    #[wasm_bindgen(getter_with_clone)]
+    pub h_container: Vec<u8>,
 
     #[wasm_bindgen(getter_with_clone)]
     pub h_ct: Vec<u8>,
@@ -2386,7 +2390,7 @@ pub struct PrecontractV3 {
 /// Result of computing desc components without a full precontract.
 #[wasm_bindgen]
 pub struct DescResult {
-    /// d = SHA256(T ‖ Q ‖ D) — 32 bytes.
+    /// d = SHA256(T ‖ Q ‖ D ‖ H) — 32 bytes.
     #[wasm_bindgen(getter_with_clone)]
     pub d: Vec<u8>,
 
@@ -2398,6 +2402,10 @@ pub struct DescResult {
 
     #[wasm_bindgen(getter_with_clone)]
     pub dim: Vec<u8>,
+
+    /// H = SHA256(x̂) — 32 bytes, hash of the canonical uncompressed container.
+    #[wasm_bindgen(getter_with_clone)]
+    pub h_container: Vec<u8>,
 }
 
 // ── desc computation WASM bindings ───────────────────────────────────────────
@@ -2406,38 +2414,38 @@ pub struct DescResult {
 /// T=196608B, Q=65536B (ELA-light), D=8B (w‖h).
 #[wasm_bindgen]
 pub fn compute_desc_image_lowres(x_hat: &[u8], w: u32, h: u32) -> DescResult {
-    let (d, t, q, dim) = crate::desc::compute_image_desc_lowres(x_hat, w, h);
-    DescResult { d: d.to_vec(), thumb: t, quality: q, dim }
+    let (d, t, q, dim, h_container) = crate::desc::compute_image_desc_lowres(x_hat, w, h);
+    DescResult { d: d.to_vec(), thumb: t, quality: q, dim, h_container: h_container.to_vec() }
 }
 
 /// Compute desc(x̂) for extended_image_crop (full-resolution crop only).
 /// T=196608B, Q=65536B (ELA-light), D=16B (w‖h‖cx‖cy).
 #[wasm_bindgen]
 pub fn compute_desc_image_crop(x_hat: &[u8], w: u32, h: u32, cx: u32, cy: u32) -> DescResult {
-    let (d, t, q, dim) = crate::desc::compute_image_desc_crop(x_hat, w, h, cx, cy);
-    DescResult { d: d.to_vec(), thumb: t, quality: q, dim }
+    let (d, t, q, dim, h_container) = crate::desc::compute_image_desc_crop(x_hat, w, h, cx, cy);
+    DescResult { d: d.to_vec(), thumb: t, quality: q, dim, h_container: h_container.to_vec() }
 }
 
 /// Compute desc(x̂) for extended_image_dual (lowres + crop).
 /// T=393216B (T_lr‖T_cr), Q=65536B (ELA-light of T_lr), D=16B (w‖h‖cx‖cy).
 #[wasm_bindgen]
 pub fn compute_desc_image_dual(x_hat: &[u8], w: u32, h: u32, cx: u32, cy: u32) -> DescResult {
-    let (d, t, q, dim) = crate::desc::compute_image_desc_dual(x_hat, w, h, cx, cy);
-    DescResult { d: d.to_vec(), thumb: t, quality: q, dim }
+    let (d, t, q, dim, h_container) = crate::desc::compute_image_desc_dual(x_hat, w, h, cx, cy);
+    DescResult { d: d.to_vec(), thumb: t, quality: q, dim, h_container: h_container.to_vec() }
 }
 
 /// Compute desc(x̂) for extended_audio (crop: first 240k samples).
 /// T=480000B, Q=1024B (RMS profile), D=12B (dur‖sr‖n_samp).
 #[wasm_bindgen]
 pub fn compute_desc_audio(x_hat: &[u8], dur: u32, sr: u32, n_samp: u32) -> DescResult {
-    let (d, t, q, dim) = crate::desc::compute_audio_desc(x_hat, dur, sr, n_samp);
-    DescResult { d: d.to_vec(), thumb: t, quality: q, dim }
+    let (d, t, q, dim, h_container) = crate::desc::compute_audio_desc(x_hat, dur, sr, n_samp);
+    DescResult { d: d.to_vec(), thumb: t, quality: q, dim, h_container: h_container.to_vec() }
 }
 
-/// Verify buyer pre-payment check: SHA256(T ‖ Q ‖ D) = d.
+/// Verify buyer pre-payment check: SHA256(T ‖ Q ‖ D ‖ H) = d.
 #[wasm_bindgen]
-pub fn verify_desc(d: &[u8], thumb: &[u8], quality: &[u8], dim: &[u8]) -> bool {
-    crate::desc::verify_desc_components(d, thumb, quality, dim)
+pub fn verify_desc(d: &[u8], thumb: &[u8], quality: &[u8], dim: &[u8], h_container: &[u8]) -> bool {
+    crate::desc::verify_desc_components(d, thumb, quality, dim, h_container)
 }
 
 // ── Precontract V3 — image_dual ───────────────────────────────────────────────
@@ -2462,12 +2470,13 @@ pub fn compute_precontract_image_dual_v3(
     cx: u32,
     cy: u32,
 ) -> PrecontractV3 {
-    let (d, t, q, dim) = crate::desc::compute_image_desc_dual(x_hat, w, h, cx, cy);
+    let (d, t, q, dim, h_container) = crate::desc::compute_image_desc_dual(x_hat, w, h, cx, cy);
     let mut file = x_hat.to_vec();
     let ct = encrypt_and_prepend_iv(&mut file, key);
     let desc_v3 = ImageDualDescV3 {
         d,
         q_bytes: q.clone(),
+        h_container,
         d_width: w,
         d_height: h,
         crop_x: cx,
@@ -2480,7 +2489,7 @@ pub fn compute_precontract_image_dual_v3(
     let h_ct = acc_ct(&ct, circuit.block_size as usize);
     let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
     let commitment = commit_hashes(&h_circuit, &h_ct);
-    PrecontractV3 { ct, circuit_bytes, d: d.to_vec(), thumb: t, quality: q, dim, h_ct, h_circuit, commitment, num_blocks, num_gates }
+    PrecontractV3 { ct, circuit_bytes, d: d.to_vec(), thumb: t, quality: q, dim, h_container: h_container.to_vec(), h_ct, h_circuit, commitment, num_blocks, num_gates }
 }
 
 // ── Precontract V3 — audio ────────────────────────────────────────────────────
@@ -2499,12 +2508,13 @@ pub fn compute_precontract_audio_v3(
     sr: u32,
     n_samp: u32,
 ) -> PrecontractV3 {
-    let (d, t, q, dim) = crate::desc::compute_audio_desc(x_hat, dur, sr, n_samp);
+    let (d, t, q, dim, h_container) = crate::desc::compute_audio_desc(x_hat, dur, sr, n_samp);
     let mut file = x_hat.to_vec();
     let ct = encrypt_and_prepend_iv(&mut file, key);
     let desc_v3 = AudioDescV3 {
         d,
         q_bytes: q.clone(),
+        h_container,
         d_dur: dur,
         d_sr: sr,
         d_n_samp: n_samp,
@@ -2516,7 +2526,7 @@ pub fn compute_precontract_audio_v3(
     let h_ct = acc_ct(&ct, circuit.block_size as usize);
     let h_circuit = crate::circuits_v2::acc_circuit_v2(&circuit.gates);
     let commitment = commit_hashes(&h_circuit, &h_ct);
-    PrecontractV3 { ct, circuit_bytes, d: d.to_vec(), thumb: t, quality: q, dim, h_ct, h_circuit, commitment, num_blocks, num_gates }
+    PrecontractV3 { ct, circuit_bytes, d: d.to_vec(), thumb: t, quality: q, dim, h_container: h_container.to_vec(), h_ct, h_circuit, commitment, num_blocks, num_gates }
 }
 
 // ── Verify received ciphertext against V3 desc ────────────────────────────────
@@ -2534,7 +2544,7 @@ pub fn check_received_ct_image_dual_v3(
     cy: u32,
 ) -> CheckCtResult {
     let decrypted = decrypt(ct, key);
-    let (d_computed, _, _, _) = crate::desc::compute_image_desc_dual(&decrypted, w, h, cx, cy);
+    let (d_computed, _, _, _, _) = crate::desc::compute_image_desc_dual(&decrypted, w, h, cx, cy);
     let success = d_computed.as_ref() == d;
     CheckCtResult { success, decrypted_file: decrypted }
 }
@@ -2550,7 +2560,7 @@ pub fn check_received_ct_audio_v3(
     n_samp: u32,
 ) -> CheckCtResult {
     let decrypted = decrypt(ct, key);
-    let (d_computed, _, _, _) = crate::desc::compute_audio_desc(&decrypted, dur, sr, n_samp);
+    let (d_computed, _, _, _, _) = crate::desc::compute_audio_desc(&decrypted, dur, sr, n_samp);
     let success = d_computed.as_ref() == d;
     CheckCtResult { success, decrypted_file: decrypted }
 }

@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
             preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
             ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
             ext_video_clip_frames, preview_video_clip, ext_video_clip_hash,
-            desc_d, desc_dim, desc_thumb, desc_quality,
+            desc_d, desc_dim, desc_thumb, desc_quality, desc_h_container,
         } = body;
 
         if (!title || !price || !pk_vendor) {
@@ -57,8 +57,8 @@ export async function POST(req: NextRequest) {
                 preview_video_thumb, ext_video_thumb_hash, ext_video_width, ext_video_height,
                 ext_video_duration, ext_video_bitrate, ext_video_size, ext_video_fps,
                 ext_video_clip_frames, preview_video_clip, ext_video_clip_hash,
-                desc_d, desc_dim, desc_thumb, desc_quality)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                desc_d, desc_dim, desc_thumb, desc_quality, desc_h_container)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             title,
             description || "",
@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
             desc_dim ?? null,
             desc_thumb ?? null,
             desc_quality ?? null,
+            desc_h_container ?? null,
         );
 
         return NextResponse.json({ id: result.lastInsertRowid }, { status: 201 });

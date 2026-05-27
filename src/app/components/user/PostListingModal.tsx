@@ -506,24 +506,35 @@ function computeElaLightFromRGBA(rgba: Uint8ClampedArray, imgW: number, imgH: nu
     return out;
 }
 
-/** Compute d = SHA256(T ‖ Q ‖ D) and encode T/Q/D for storage. */
+/** Compute d = SHA256(T ‖ Q ‖ D [‖ H]) and encode T/Q/D for storage.
+ *  When xHatBytes is provided, H = SHA256(x̂) is appended before hashing (V3 full description).
+ *  Without xHatBytes, falls back to SHA256(T ‖ Q ‖ D) for types without a canonical container. */
 async function computeDescV3(
     thumbParts: Uint8Array[],
     quality: Uint8Array,
     dimBytes: Uint8Array,
-): Promise<{ dHex: string; dimHex: string; thumbBase64: string; qualityBase64: string }> {
+    xHatBytes?: Uint8Array,
+): Promise<{ dHex: string; dimHex: string; thumbBase64: string; qualityBase64: string; hContainerHex: string | null }> {
     const tLen = thumbParts.reduce((a, p) => a + p.length, 0);
-    const tqd = new Uint8Array(tLen + quality.length + dimBytes.length);
+    let h: Uint8Array | null = null;
+    let hContainerHex: string | null = null;
+    if (xHatBytes) {
+        const hBuf = await crypto.subtle.digest("SHA-256", xHatBytes);
+        h = new Uint8Array(hBuf);
+        hContainerHex = Array.from(h).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+    const tqdh = new Uint8Array(tLen + quality.length + dimBytes.length + (h ? h.length : 0));
     let off = 0;
-    for (const p of thumbParts) { tqd.set(p, off); off += p.length; }
-    tqd.set(quality, off); off += quality.length;
-    tqd.set(dimBytes, off);
-    const hashBuf = await crypto.subtle.digest("SHA-256", tqd);
+    for (const p of thumbParts) { tqdh.set(p, off); off += p.length; }
+    tqdh.set(quality, off); off += quality.length;
+    tqdh.set(dimBytes, off); off += dimBytes.length;
+    if (h) { tqdh.set(h, off); }
+    const hashBuf = await crypto.subtle.digest("SHA-256", tqdh);
     const d = new Uint8Array(hashBuf);
     const dHex = Array.from(d).map(b => b.toString(16).padStart(2, "0")).join("");
     const dimHex = Array.from(dimBytes).map(b => b.toString(16).padStart(2, "0")).join("");
-    const t = tqd.subarray(0, tLen);
-    return { dHex, dimHex, thumbBase64: uint8ToBase64(t), qualityBase64: uint8ToBase64(quality) };
+    const t = tqdh.subarray(0, tLen);
+    return { dHex, dimHex, thumbBase64: uint8ToBase64(t), qualityBase64: uint8ToBase64(quality), hContainerHex };
 }
 
 /** Build big-endian u32 bytes. */
@@ -842,7 +853,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setVideoSize(null);
         setVideoFps(null);
         setVideoClipFrames(null);
-        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null);
+        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null); setDescHContainer(null);
     };
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
@@ -891,11 +902,12 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
     const [cropBoxY, setCropBoxY] = useState(0);
     const cropImgRef = useRef<HTMLImageElement>(null);
     const cropDragStart = useRef<{ mx: number; my: number; bx: number; by: number } | null>(null);
-    // desc V3 fields: d = SHA256(T‖Q‖D), dim hex, thumb/quality base64
+    // desc V3 fields: d = SHA256(T‖Q‖D‖H), dim hex, thumb/quality/h_container base64/hex
     const [descD, setDescD] = useState<string | null>(null);
     const [descDim, setDescDim] = useState<string | null>(null);
     const [descThumb, setDescThumb] = useState<string | null>(null);
     const [descQuality, setDescQuality] = useState<string | null>(null);
+    const [descHContainer, setDescHContainer] = useState<string | null>(null);
     // Video fields
     const [videoThumbDataUrl, setVideoThumbDataUrl] = useState<string | null>(null);
     const [videoThumbHash, setVideoThumbHash] = useState<string | null>(null);
@@ -1040,7 +1052,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setCropY(null);
         setCropBoxX(0);
         setCropBoxY(0);
-        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null);
+        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null); setDescHContainer(null);
 
         if (algo === "default") {
             setIsAnalyzing(false);
@@ -1093,8 +1105,12 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     if (algo === "extended_image") {
                         const qBytes = computeElaLightFullRes(bmpBytes, width, height);
                         const dim = new Uint8Array([...beU32(width), ...beU32(height)]);
-                        const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([thumbBytes], qBytes, dim);
-                        setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+                        const xHatSize = 64 + bmpBytes.length;
+                        const xHat = new Uint8Array(xHatSize);
+                        xHat[0] = 0x00; new DataView(xHat.buffer).setUint32(1, xHatSize, false);
+                        xHat.set(bmpBytes, 64);
+                        const { dHex, dimHex, thumbBase64, qualityBase64, hContainerHex } = await computeDescV3([thumbBytes], qBytes, dim, xHat);
+                        setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64); setDescHContainer(hContainerHex);
                     }
                 }
 
@@ -1116,7 +1132,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
         setAudioSize(null);
         setAudioLowresUrl(null);
         setAudioLowresHash(null);
-        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null);
+        setDescD(null); setDescDim(null); setDescThumb(null); setDescQuality(null); setDescHContainer(null);
         try {
             const needsPreview = algo === "extended_audio" || algo === "extended_audio_both";
             const needsLowres  = algo === "extended_audio_lowres" || algo === "extended_audio_both";
@@ -1137,8 +1153,19 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                     // Q computed over full file (matches Python master), not just the 240k preview crop.
                     const qBytes = computeSecondDiffQuality(result.fullPcmInt16, result.totalSamples);
                     const dim = new Uint8Array([...beU32(durationSecs), ...beU32(originalSr), ...beU32(result.totalSamples)]);
-                    const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([result.pcmBytes], qBytes, dim);
-                    setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+                    const fullPcmUint8 = new Uint8Array(result.fullPcmInt16.buffer, result.fullPcmInt16.byteOffset, result.fullPcmInt16.byteLength);
+                    const xHatSize = 64 + fullPcmUint8.length;
+                    const xHat = new Uint8Array(xHatSize);
+                    const xHatView = new DataView(xHat.buffer);
+                    xHat[0] = algo === "extended_audio" ? 0x01 : 0x03;
+                    xHatView.setUint32(1, xHatSize, false);
+                    xHatView.setUint32(5, durationSecs, false);
+                    xHatView.setUint32(9, result.bitrateKbps, false);
+                    xHatView.setUint32(13, originalSr, false);
+                    xHatView.setUint32(17, result.totalSamples, false);
+                    xHat.set(fullPcmUint8, 64);
+                    const { dHex, dimHex, thumbBase64, qualityBase64, hContainerHex } = await computeDescV3([result.pcmBytes], qBytes, dim, xHat);
+                    setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64); setDescHContainer(hContainerHex);
                 }
             }
             if (needsLowres) {
@@ -1295,13 +1322,21 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             const thumbBytesLr = computeThumbBytesFromBmp(bmpBytes, bmpWidth, bmpHeight);
             const qBytes = computeElaLightFullRes(bmpBytes, bmpWidth, bmpHeight);
             const dim = new Uint8Array([...beU32(bmpWidth), ...beU32(bmpHeight), ...beU32(nativeX), ...beU32(nativeY)]);
-            const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([thumbBytesLr, cropBytes], qBytes, dim);
-            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+            const xHatSize = 64 + bmpBytes.length;
+            const xHat = new Uint8Array(xHatSize);
+            xHat[0] = 0x03; new DataView(xHat.buffer).setUint32(1, xHatSize, false);
+            xHat.set(bmpBytes, 64);
+            const { dHex, dimHex, thumbBase64, qualityBase64, hContainerHex } = await computeDescV3([thumbBytesLr, cropBytes], qBytes, dim, xHat);
+            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64); setDescHContainer(hContainerHex);
         } else if (algorithms === "extended_image_crop") {
             const qBytes = computeElaLightFullRes(bmpBytes, bmpWidth, bmpHeight);
             const dim = new Uint8Array([...beU32(bmpWidth), ...beU32(bmpHeight), ...beU32(nativeX), ...beU32(nativeY)]);
-            const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3([cropBytes], qBytes, dim);
-            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+            const xHatSize = 64 + bmpBytes.length;
+            const xHat = new Uint8Array(xHatSize);
+            xHat[0] = 0x02; new DataView(xHat.buffer).setUint32(1, xHatSize, false);
+            xHat.set(bmpBytes, 64);
+            const { dHex, dimHex, thumbBase64, qualityBase64, hContainerHex } = await computeDescV3([cropBytes], qBytes, dim, xHat);
+            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64); setDescHContainer(hContainerHex);
         }
     }, [selectedFile, cropBoxX, cropBoxY, algorithms]);
 
@@ -1459,12 +1494,13 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
             }
             // ── Desc V3: d = SHA256(T ‖ Q ‖ D) ──────────────────────────────────
             // D encodes the canonical parameters the circuit uses: cW, cH, dur, sr, nSamp
+            // Video canonical container is not built here (requires full frame decode), so H is omitted.
             const dimBytes = new Uint8Array([...beU32(cW), ...beU32(cH), ...beU32(dur), ...beU32(sr), ...beU32(nSamp)]);
             const thumbParts: Uint8Array[] = [];
             if (needsThumb) thumbParts.push(thumbRgb);
             if (needsClip && clipBuf) thumbParts.push(clipBuf);
             const { dHex, dimHex, thumbBase64, qualityBase64 } = await computeDescV3(thumbParts, qVideoBytes, dimBytes);
-            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64);
+            setDescD(dHex); setDescDim(dimHex); setDescThumb(thumbBase64); setDescQuality(qualityBase64); setDescHContainer(null);
 
             URL.revokeObjectURL(objectUrl);
         } catch (e: any) {
@@ -1597,6 +1633,7 @@ export default function PostListingModal({ onClose, vendorPk }: PostListingModal
                 body.desc_dim = descDim;
                 body.desc_thumb = descThumb;
                 body.desc_quality = descQuality;
+                if (descHContainer) body.desc_h_container = descHContainer;
             }
 
             const res = await fetch("/api/listings", {
