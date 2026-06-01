@@ -169,54 +169,6 @@ else
     echo -e "${YELLOW}6. Skipping Rust compilation (Cargo not available)...${NC}"
 fi
 
-# Compile ZK host binary
-if [ "$RUST_AVAILABLE" = true ]; then
-    echo -e "${GREEN}7. Compiling ZK host binary (zk-host)...${NC}"
-    if [ -d "src/zk" ]; then
-        cd src/zk
-        ZK_BINARY="target/release/zk-host"
-        if [ -f "$ZK_BINARY" ]; then
-            echo -e "   ✅ zk-host already compiled: $ZK_BINARY"
-            echo -e "   ${YELLOW}   (Delete to force recompilation)${NC}"
-        else
-            echo -e "   Compiling zk-host (this may take several minutes)..."
-            if cargo build --release -p zk-host; then
-                echo -e "   ✅ zk-host compiled successfully"
-            else
-                echo -e "   ${RED}❌ zk-host compilation failed${NC}"
-                echo -e "   ${YELLOW}   ZK proof generation will be unavailable.${NC}"
-                echo -e "   ${YELLOW}   Run manually: cd src/zk && cargo build --release -p zk-host${NC}"
-            fi
-        fi
-        cd ../..
-    else
-        echo -e "   ${YELLOW}⚠️  src/zk directory not found, skipping...${NC}"
-    fi
-else
-    echo -e "${YELLOW}7. Skipping zk-host compilation (Cargo not available)...${NC}"
-fi
-
-# Compile ZK guest ELF (requires Succinct toolchain)
-echo -e "${GREEN}7b. Compiling ZK guest ELF (zk-guest)...${NC}"
-ZK_GUEST_ELF="src/zk/zk-guest/elf/riscv32im-succinct-zkvm-elf"
-if [ -f "$ZK_GUEST_ELF" ]; then
-    echo -e "   ✅ ZK guest ELF already exists (pre-compiled)"
-    echo -e "   ${YELLOW}   (Delete to force recompilation — requires Succinct toolchain)${NC}"
-elif cargo +succinct --version &> /dev/null 2>&1; then
-    echo -e "   Succinct toolchain found. Building ZK guest for RISC-V (this may take several minutes)..."
-    cd src/zk/zk-guest
-    if cargo +succinct build --target riscv32im-succinct-zkvm-elf --release; then
-        echo -e "   ✅ ZK guest ELF compiled successfully"
-    else
-        echo -e "   ${RED}❌ ZK guest compilation failed${NC}"
-        echo -e "   ${YELLOW}   Run manually: cd src/zk/zk-guest && cargo +succinct build --target riscv32im-succinct-zkvm-elf --release${NC}"
-    fi
-    cd ../../..
-else
-    echo -e "   ${YELLOW}⚠️  Succinct toolchain not found — ZK guest ELF not rebuilt.${NC}"
-    echo -e "   ${YELLOW}   Install it from: https://docs.succinct.xyz/getting-started/install.html${NC}"
-    echo -e "   ${YELLOW}   Then run: cd src/zk/zk-guest && cargo +succinct build --target riscv32im-succinct-zkvm-elf --release${NC}"
-fi
 
 # Initialize database
 if [ "$SQLITE_AVAILABLE" = true ]; then
